@@ -106,8 +106,18 @@
 
     <section id="detail-card" class="card" hidden></section>
 
+    <section id="graph3d-card" class="card" hidden>
+      <h2 id="graph3d-title">3D view</h2>
+      <div id="legend3d" class="legend"></div>
+      <div class="graph-wrap"><canvas id="graph3d" aria-label="3D view of the region"></canvas></div>
+      <div id="readout3d" class="readout"></div>
+      <div class="row-actions graph-controls">
+        <button id="reset3d">Reset view</button>
+      </div>
+    </section>
+
     <section id="graph-card" class="card" hidden>
-      <h2>Graph</h2>
+      <h2 id="graph-title">Graph</h2>
       <div id="legend" class="legend"></div>
       <div class="graph-wrap"><canvas id="graph" aria-label="Graph"></canvas></div>
       <div id="readout" class="readout"></div>

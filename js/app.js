@@ -4,6 +4,7 @@ import { simplify, setMainVar } from './simplify.js';
 import { integrate } from './integrate.js';
 import { definite, riemann, areaBetween, iterated, boundTex, niceTex, fnOf } from './calculus.js';
 import { Graph } from './graph.js';
+import { Graph3D } from './graph3d.js';
 import { fmt, recognize } from './solve.js';
 
 const $ = id => document.getElementById(id);
@@ -49,7 +50,7 @@ const EXAMPLES = {
 };
 
 const state = { mode: 'indef', lastInput: null, steps: null };
-let graph;
+let graph, graph3d;
 
 // ---------- reading inputs ----------
 
@@ -380,11 +381,114 @@ function runMulti() {
   }).join('');
   $('detail-card').innerHTML = `<h2>Integrate from the inside out</h2>${r.mismatch ? '<p class="note">The exact steps did not match a numeric check, so the numeric value is shown.</p>' : ''}${body}`;
   $('detail-card').hidden = false;
-  $('graph-card').hidden = true;
+  drawMulti(f, layers);
+}
+
+// ---------- pictures for double and triple integrals ----------
+
+// The region in the plane of the two outermost variables, shaded with strips the way the
+// bounds describe it: vertical strips when the inner of the two is graphed up and down.
+function drawRegion(L2, L1, title) {
+  const u = L1.v, w = L2.v;                          // outer, inner
+  const a = compile(L1.lo)({}), b = compile(L1.hi)({});
+  const loC = compile(L2.lo), hiC = compile(L2.hi);
+  const lo = x => loC({ [u]: x }), hi = x => hiC({ [u]: x });
+  const pair = new Set([u, w]);
+  const horiz = pair.has('x') && pair.has('y') ? 'x' : u; // horizontal axis variable
+  const vertStrips = horiz === u;
+  const ut = symTex(u), wt = symTex(w);
+  // bounding box of the region
+  const xs = [], ys = [];
+  for (let i = 0; i <= 200; i++) {
+    const t = a + (b - a) * i / 200;
+    for (const val of [lo(t), hi(t)]) if (isFinite(val)) { (vertStrips ? xs : ys).push(t); (vertStrips ? ys : xs).push(val); }
+  }
+  const box = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const pad = k => Math.max((box[k + 1] - box[k]) * 0.25, 0.5);
+  const view = { x0: box[0] - pad(0), x1: box[1] + pad(0), y0: box[2] - pad(2), y1: box[3] + pad(2) };
+  const red = '#dc2626', green = '#15803d';
+  const curves = vertStrips
+    ? [{ f: lo, color: red }, { f: hi, color: green },
+       { px: t => [a, lo(a) + (hi(a) - lo(a)) * t], color: '#64748b', width: 2, dash: [5, 4] },
+       { px: t => [b, lo(b) + (hi(b) - lo(b)) * t], color: '#64748b', width: 2, dash: [5, 4] }]
+    : [{ px: t => [lo(t), t], t0: a, t1: b, color: red }, { px: t => [hi(t), t], t0: a, t1: b, color: green },
+       { px: t => [lo(a) + (hi(a) - lo(a)) * t, a], color: '#64748b', width: 2, dash: [5, 4] },
+       { px: t => [lo(b) + (hi(b) - lo(b)) * t, b], color: '#64748b', width: 2, dash: [5, 4] }];
+  // keep plain function curves from drawing outside [a, b]
+  if (vertStrips) curves.slice(0, 2).forEach(cv => { const g = cv.f; cv.f = x => (x >= a && x <= b ? g(x) : NaN); });
+  $('graph-title').textContent = title;
+  showGraph({
+    curves, view, xName: horiz,
+    shade: [vertStrips ? { top: hi, bottom: lo, a, b, signed: false } : { horizontal: true, left: lo, right: hi, c: a, d: b }],
+    hint: vertStrips
+      ? `Each vertical strip runs from the red curve up to the green curve; ${ut} sweeps from ${fmt(a)} to ${fmt(b)}.`
+      : `Each horizontal strip runs from the red curve to the green curve; ${ut} sweeps from ${fmt(a)} to ${fmt(b)}.`,
+  }, `<span><i style="background:${red}"></i>lower bound ${M(`${wt} = ${toTex(L2.lo)}`)}</span>` +
+     `<span><i style="background:${green}"></i>upper bound ${M(`${wt} = ${toTex(L2.hi)}`)}</span>` +
+     `<span><i style="background:#64748b"></i>${M(`${ut} = ${toTex(L1.lo)}`)} and ${M(`${ut} = ${toTex(L1.hi)}`)}</span>` +
+     `<span><i style="background:rgba(37,99,235,.35)"></i>region</span>`);
+}
+
+const TOP = [37, 99, 235], BOTTOM = [13, 148, 136], WALL = [147, 197, 253];
+
+function drawMulti(f, layers) {
+  const n = layers.length;
+  const outer = layers[n - 1], mid = layers[n - 2];
+  const u = outer.v, w = mid.v;
+  const a = compile(outer.lo)({}), b = compile(outer.hi)({});
+  const wLo = compile(mid.lo), wHi = compile(mid.hi);
+  const env = {};
+  const U = s => a + (b - a) * s;
+  const W = (uu, r) => { env[u] = uu; const l = wLo(env), h = wHi(env); return l + (h - l) * r; };
+
+  drawRegion(mid, outer, n === 3 ? `Shadow of the solid in the ${u}${w}-plane` : 'Region of integration');
+
+  let names, place, bottom, top, legend;
+  if (n === 2) {
+    // volume under z = f over the region
+    const F = compile(f);
+    const pair = new Set([u, w]);
+    const [iu, iw] = pair.has('x') && pair.has('y') ? [u === 'x' ? 0 : 1, w === 'x' ? 0 : 1] : [0, 1];
+    names = []; names[iu] = u; names[iw] = w; names[2] = 'z';
+    place = (uu, ww, t) => { const p = []; p[iu] = uu; p[iw] = ww; p[2] = t; return p; };
+    bottom = () => 0;
+    top = (uu, ww) => { env[u] = uu; env[w] = ww; return F(env); };
+    $('graph3d-title').textContent = 'Volume under the surface';
+    legend = `<span><i style="background:rgb(${TOP})"></i>surface ${M(`z = ${toTex(f)}`)}</span>` +
+      `<span><i style="background:rgb(${BOTTOM})"></i>region in the ${u}${w}-plane</span>` +
+      `<span>The double integral is the signed volume between them.</span>`;
+  } else {
+    const inner = layers[0], t0 = inner.v;
+    const tLo = compile(inner.lo), tHi = compile(inner.hi);
+    const set = new Set([u, w, t0]);
+    const xyz = set.has('x') && set.has('y') && set.has('z');
+    const idx = v => (xyz ? { x: 0, y: 1, z: 2 }[v] : { [u]: 0, [w]: 1, [t0]: 2 }[v]);
+    names = []; names[idx(u)] = u; names[idx(w)] = w; names[idx(t0)] = t0;
+    place = (uu, ww, t) => { const p = []; p[idx(u)] = uu; p[idx(w)] = ww; p[idx(t0)] = t; return p; };
+    bottom = (uu, ww) => { env[u] = uu; env[w] = ww; return tLo(env); };
+    top = (uu, ww) => { env[u] = uu; env[w] = ww; return tHi(env); };
+    $('graph3d-title').textContent = 'The solid region';
+    legend = `<span><i style="background:rgb(${TOP})"></i>top ${M(`${symTex(t0)} = ${toTex(inner.hi)}`)}</span>` +
+      `<span><i style="background:rgb(${BOTTOM})"></i>bottom ${M(`${symTex(t0)} = ${toTex(inner.lo)}`)}</span>` +
+      `<span><i style="background:rgb(${WALL})"></i>sides</span>`;
+  }
+  const pt = (s, r, k) => { const uu = U(s), ww = W(uu, r); return { uu, ww, lo: bottom(uu, ww), hi: top(uu, ww), k }; };
+  const surf = (fnc, color) => ({ map: fnc, color });
+  const surfaces = [
+    surf((s, r) => { const p = pt(s, r); return place(p.uu, p.ww, p.hi); }, TOP),
+    surf((s, r) => { const p = pt(s, r); return place(p.uu, p.ww, p.lo); }, BOTTOM),
+    // walls: w at its lower / upper bound, and u at a / b
+    ...[0, 1].map(edge => surf((s, r) => { const p = pt(s, edge); return place(p.uu, p.ww, p.lo + (p.hi - p.lo) * r); }, WALL)),
+    ...[0, 1].map(edge => surf((s, r) => { const p = pt(edge, s); return place(p.uu, p.ww, p.lo + (p.hi - p.lo) * r); }, WALL)),
+  ];
+  $('graph3d-card').hidden = false;
+  $('legend3d').innerHTML = legend;
+  graph3d.set({ surfaces, names });
 }
 
 function showGraph(scene, legend) {
   $('graph-card').hidden = false;
+  if (state.mode !== 'multi') { $('graph-title').textContent = 'Graph'; $('graph3d-card').hidden = true; }
   $('legend').innerHTML = legend;
   graph.set(scene);
 }
@@ -393,13 +497,15 @@ function showGraph(scene, legend) {
 
 const RUN = { indef: runIndefinite, def: runDefinite, riemann: runRiemann, area: runArea, multi: runMulti };
 
-function compute() {
+// quiet = true when switching tabs: half-filled inputs just leave the results empty
+function compute(quiet = false) {
   $('error').hidden = true;
   try { RUN[state.mode](); } catch (e) {
+    if (quiet) { ['answer-card', 'detail-card', 'graph-card', 'graph3d-card'].forEach(id => { $(id).hidden = true; }); return; }
     console.error(e);
     $('error').textContent = e.message || String(e);
     $('error').hidden = false;
-    ['answer-card', 'detail-card', 'graph-card'].forEach(id => { $(id).hidden = true; });
+    ['answer-card', 'detail-card', 'graph-card', 'graph3d-card'].forEach(id => { $(id).hidden = true; });
   }
 }
 
@@ -417,10 +523,10 @@ function setMode(mode) {
   $('examples').innerHTML = '<option value="">Choose an example…</option>' +
     EXAMPLES[mode].map(([name, ex], i) => `<option value="${i}">${esc(name)}: ${esc(ex.f)}${ex.g ? ` and ${esc(ex.g)}` : ''}${ex.a ? ` on [${esc(ex.a)}, ${esc(ex.b)}]` : ''}</option>`).join('');
   if (mode === 'multi' && !$('layers').children.length) renderLayers();
-  ['answer-card', 'detail-card', 'graph-card'].forEach(id => { $(id).hidden = true; });
+  ['answer-card', 'detail-card', 'graph-card', 'graph3d-card'].forEach(id => { $(id).hidden = true; });
   $('error').hidden = true;
   updatePreview();
-  if ($('f').value.trim()) compute();
+  if ($('f').value.trim()) compute(true);
 }
 
 function loadExample(i) {
@@ -478,6 +584,8 @@ function insertAtCursor(text, close = '') {
 
 function init() {
   graph = new Graph($('graph'), $('readout'));
+  graph3d = new Graph3D($('graph3d'), $('readout3d'));
+  $('reset3d').addEventListener('click', () => graph3d.reset());
   $('tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setMode(b.dataset.mode); });
   $('examples').addEventListener('change', e => { if (e.target.value !== '') loadExample(+e.target.value); });
   $('go').addEventListener('click', compute);

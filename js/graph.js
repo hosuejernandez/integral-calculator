@@ -41,6 +41,7 @@ export class Graph {
 
   autoView() {
     const s = this.scene;
+    if (s.view) return { ...s.view };
     let [x0, x1] = s.window || [-6, 6];
     if (!isFinite(x0)) x0 = isFinite(x1) ? x1 - 10 : -10;
     if (!isFinite(x1)) x1 = x0 + 10;
@@ -103,9 +104,12 @@ export class Graph {
     this.grid();
     const s = this.scene;
     if (!s) return;
-    for (const sh of s.shade || []) this.shade(sh);
+    for (const sh of s.shade || []) (sh.horizontal ? this.shadeH(sh) : this.shade(sh));
     for (const rc of s.rects || []) this.rect(rc);
-    for (const cv of s.curves) this.curve(cv.f, cv.color, cv.dash || [], cv.width || 3);
+    for (const cv of s.curves) {
+      if (cv.px) this.paramCurve(cv);
+      else this.curve(cv.f, cv.color, cv.dash || [], cv.width || 3);
+    }
     ctx.font = '600 12px system-ui, sans-serif';
     for (const p of s.points || []) {
       if (!isFinite(p.y)) continue;
@@ -146,6 +150,34 @@ export class Graph {
       prev = pt;
     }
     ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  // curve given as t -> [x, y] for t in [t0, t1]
+  paramCurve({ px, t0 = 0, t1 = 1, color, width = 3, dash = [] }) {
+    const ctx = this.ctx, n = 300;
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash); ctx.beginPath();
+    let started = false;
+    for (let i = 0; i <= n; i++) {
+      const [x, y] = px(t0 + (t1 - t0) * i / n);
+      if (!isFinite(x) || !isFinite(y)) { started = false; continue; }
+      if (started) ctx.lineTo(this.sx(x), this.sy(y)); else { ctx.moveTo(this.sx(x), this.sy(y)); started = true; }
+    }
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  // fill between x = left(y) and x = right(y) for y in [c, d] (horizontal strips)
+  shadeH({ left, right, c, d }) {
+    const ctx = this.ctx, n = 240;
+    ctx.fillStyle = C.pos;
+    for (let i = 0; i < n; i++) {
+      const y0 = c + (d - c) * i / n, y1 = c + (d - c) * (i + 1) / n;
+      const l0 = left(y0), l1 = left(y1), r0 = right(y0), r1 = right(y1);
+      if (![l0, l1, r0, r1].every(isFinite)) continue;
+      ctx.beginPath();
+      ctx.moveTo(this.sx(l0), this.sy(y0)); ctx.lineTo(this.sx(r0), this.sy(y0));
+      ctx.lineTo(this.sx(r1), this.sy(y1)); ctx.lineTo(this.sx(l1), this.sy(y1));
+      ctx.closePath(); ctx.fill();
+    }
   }
 
   // fill between top(x) and bottom(x) on [a, b]; signed = blue above / red below
@@ -195,6 +227,7 @@ export class Graph {
     ctx.beginPath(); ctx.moveTo(this.sx(x), 0); ctx.lineTo(this.sx(x), this.H); ctx.stroke(); ctx.setLineDash([]);
     const parts = [`${s.xName || 'x'} = ${fmtNum(x)}`];
     for (const cv of s.curves) {
+      if (!cv.f || !cv.label) continue;
       const y = cv.f(x);
       if (isFinite(y)) { ctx.fillStyle = cv.color; ctx.beginPath(); ctx.arc(this.sx(x), this.sy(y), 4, 0, 2 * Math.PI); ctx.fill(); }
       parts.push(`${cv.label} = ${fmtNum(y)}`);
