@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Integral Calculator</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+  <link rel="stylesheet" href="css/style.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Integral Calculator</h1>
+      <p>Step-by-step antiderivatives, definite integrals, Riemann sums, area between curves, and double &amp; triple integrals.</p>
+    </header>
+
+    <nav class="tabs" id="tabs" role="tablist">
+      <button role="tab" data-mode="indef" aria-selected="true">Indefinite</button>
+      <button role="tab" data-mode="def">Definite</button>
+      <button role="tab" data-mode="riemann">Riemann sums</button>
+      <button role="tab" data-mode="area">Area between curves</button>
+      <button role="tab" data-mode="multi">Double &amp; triple</button>
+    </nav>
+
+    <section class="card input-card">
+      <label class="field-label" for="f" id="f-label">Integrand</label>
+      <div class="input-row">
+        <input id="f" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="e.g.  x e^x    sin^2 x    1/(x^2 + 1)">
+        <button id="go" class="primary">Integrate</button>
+      </div>
+      <div class="input-row g-row" id="g-row" hidden>
+        <label class="field-label inline" for="g">and</label>
+        <input id="g" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="second curve g(x), e.g.  x^2">
+      </div>
+      <div class="keypad" id="keypad" aria-label="Insert math">
+        <button data-insert="^2">x²</button>
+        <button data-insert="^">xⁿ</button>
+        <button data-insert="sqrt(" data-close=")">√</button>
+        <button data-insert="/">÷</button>
+        <button data-insert="(" data-close=")">( )</button>
+        <button data-insert="sin(" data-close=")">sin</button>
+        <button data-insert="cos(" data-close=")">cos</button>
+        <button data-insert="tan(" data-close=")">tan</button>
+        <button data-insert="ln(" data-close=")">ln</button>
+        <button data-insert="e^(" data-close=")">eˣ</button>
+        <button data-insert="pi">π</button>
+        <button data-insert="inf">∞</button>
+      </div>
+      <div id="preview" class="preview" aria-live="polite"></div>
+
+      <div class="options">
+        <label class="wrt" id="wrt-row">Integrate with respect to:
+          <input id="wrt" type="text" value="x" maxlength="6" autocomplete="off" spellcheck="false">
+        </label>
+        <span class="bounds" id="bounds-row" hidden>
+          <label>from <input id="a" type="text" autocomplete="off" placeholder="a"></label>
+          <label>to <input id="b" type="text" autocomplete="off" placeholder="b"></label>
+        </span>
+        <label class="examples">Examples:
+          <select id="examples"></select>
+        </label>
+      </div>
+
+      <div class="options" id="riemann-row" hidden>
+        <label>Rectangles <i>n</i> =
+          <input id="n" type="range" min="1" max="100" value="6">
+          <output id="n-out">6</output>
+        </label>
+        <label>Method
+          <select id="method">
+            <option value="left">Left endpoints</option>
+            <option value="right">Right endpoints</option>
+            <option value="midpoint">Midpoints</option>
+            <option value="trapezoid">Trapezoids</option>
+          </select>
+        </label>
+      </div>
+
+      <div id="multi-row" hidden>
+        <div class="options">
+          <label>Type
+            <select id="dims">
+              <option value="2">Double integral</option>
+              <option value="3" selected>Triple integral</option>
+            </select>
+          </label>
+        </div>
+        <p class="hint">Rows go from the <b>inside out</b>. Inner bounds may use the outer variables (for example y from 0 to x).</p>
+        <div class="layers" id="layers"></div>
+      </div>
+      <p class="hint" id="area-hint" hidden>Leave the bounds blank to use the region where the curves cross.</p>
+    </section>
+
+    <div id="error" class="error" role="alert" hidden></div>
+
+    <section id="answer-card" class="card" hidden>
+      <h2 id="answer-title">Answer</h2>
+      <div id="answer" class="result"></div>
+      <div class="row-actions">
+        <button id="toggle-steps">Show steps</button>
+      </div>
+      <div id="steps" class="steps" hidden></div>
+    </section>
+
+    <section id="detail-card" class="card" hidden></section>
+
+    <section id="graph-card" class="card" hidden>
+      <h2>Graph</h2>
+      <div id="legend" class="legend"></div>
+      <div class="graph-wrap"><canvas id="graph" aria-label="Graph"></canvas></div>
+      <div id="readout" class="readout"></div>
+      <div class="row-actions graph-controls">
+        <button id="zoom-in" aria-label="Zoom in">＋</button>
+        <button id="zoom-out" aria-label="Zoom out">－</button>
+        <button id="zoom-reset">Reset view</button>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
