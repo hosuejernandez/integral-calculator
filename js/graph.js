@@ -34,6 +34,15 @@ export class Graph {
   set(scene) {
     this.scene = scene;
     this.home = this.autoView();
+    if (scene.equalAspect) {
+      // same scale on both axes so circles look round
+      const r = this.canvas.getBoundingClientRect(), v = this.home;
+      if (r.width && r.height) {
+        const want = r.width / r.height, have = (v.x1 - v.x0) / (v.y1 - v.y0);
+        if (have < want) { const c = (v.x0 + v.x1) / 2, h = (v.y1 - v.y0) * want / 2; v.x0 = c - h; v.x1 = c + h; }
+        else { const c = (v.y0 + v.y1) / 2, h = (v.x1 - v.x0) / want / 2; v.y0 = c - h; v.y1 = c + h; }
+      }
+    }
     this.view = { ...this.home };
     this.hover = null;
     this.draw();
@@ -124,6 +133,7 @@ export class Graph {
       ctx.strokeRect(Math.min(X0, X1), Math.min(Y0, Y1), Math.max(Math.abs(X1 - X0), 3), Math.max(Math.abs(Y1 - Y0), 3));
       ctx.setLineDash([]);
     }
+    for (const ar of s.arrows || []) this.arrow(ar);
     for (const cv of s.curves) {
       if (cv.px) this.paramCurve(cv);
       else this.curve(cv.f, cv.color, cv.dash || [], cv.width || 3);
@@ -168,6 +178,18 @@ export class Graph {
       prev = pt;
     }
     ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  arrow({ x, y, dx, dy, color = '#64748b', width = 1.5, head = 6 }) {
+    const ctx = this.ctx;
+    const X0 = this.sx(x), Y0 = this.sy(y), X1 = this.sx(x + dx), Y1 = this.sy(y + dy);
+    const ang = Math.atan2(Y1 - Y0, X1 - X0);
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = width;
+    ctx.beginPath(); ctx.moveTo(X0, Y0); ctx.lineTo(X1, Y1); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(X1, Y1);
+    ctx.lineTo(X1 - head * Math.cos(ang - 0.45), Y1 - head * Math.sin(ang - 0.45));
+    ctx.lineTo(X1 - head * Math.cos(ang + 0.45), Y1 - head * Math.sin(ang + 0.45));
+    ctx.closePath(); ctx.fill();
   }
 
   // curve given as t -> [x, y] for t in [t0, t1]

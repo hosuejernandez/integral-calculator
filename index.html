@@ -6,15 +6,15 @@
   <title>Integral Calculator</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=mvqyun5j">
-  <script type="importmap">{"imports":{"./js/app.js":"./js/app.js?v=mvqyun5j","./js/calculus.js":"./js/calculus.js?v=mvqyun5j","./js/diff.js":"./js/diff.js?v=mvqyun5j","./js/expr.js":"./js/expr.js?v=mvqyun5j","./js/graph.js":"./js/graph.js?v=mvqyun5j","./js/graph3d.js":"./js/graph3d.js?v=mvqyun5j","./js/integrate.js":"./js/integrate.js?v=mvqyun5j","./js/learn.js":"./js/learn.js?v=mvqyun5j","./js/multi.js":"./js/multi.js?v=mvqyun5j","./js/quiz.js":"./js/quiz.js?v=mvqyun5j","./js/simplify.js":"./js/simplify.js?v=mvqyun5j","./js/solve.js":"./js/solve.js?v=mvqyun5j","./js/volume.js":"./js/volume.js?v=mvqyun5j"}}</script>
-  <script type="module" src="js/app.js?v=mvqyun5j"></script>
+  <link rel="stylesheet" href="css/style.css?v=mvqyyzt0">
+  <script type="importmap">{"imports":{"./js/app.js":"./js/app.js?v=mvqyyzt0","./js/calculus.js":"./js/calculus.js?v=mvqyyzt0","./js/diff.js":"./js/diff.js?v=mvqyyzt0","./js/expr.js":"./js/expr.js?v=mvqyyzt0","./js/graph.js":"./js/graph.js?v=mvqyyzt0","./js/graph3d.js":"./js/graph3d.js?v=mvqyyzt0","./js/integrate.js":"./js/integrate.js?v=mvqyyzt0","./js/learn.js":"./js/learn.js?v=mvqyyzt0","./js/line.js":"./js/line.js?v=mvqyyzt0","./js/multi.js":"./js/multi.js?v=mvqyyzt0","./js/quiz.js":"./js/quiz.js?v=mvqyyzt0","./js/simplify.js":"./js/simplify.js?v=mvqyyzt0","./js/solve.js":"./js/solve.js?v=mvqyyzt0","./js/volume.js":"./js/volume.js?v=mvqyyzt0"}}</script>
+  <script type="module" src="js/app.js?v=mvqyyzt0"></script>
 </head>
 <body>
   <main>
     <header>
       <h1>Integral Calculator</h1>
-      <p>Step-by-step antiderivatives, definite integrals, Riemann sums, area between curves, and double &amp; triple integrals.</p>
+      <p>Step-by-step integrals for AP Calculus and Calc 3, with a practice quiz. Try each step yourself, then check your answer.</p>
     </header>
 
     <nav class="tabs" id="tabs" role="tablist">
@@ -28,6 +28,7 @@
       </div>
       <div class="tab-group"><span class="tab-group-label">Calc 3</span>
         <button role="tab" data-mode="multi">Multiple integrals</button>
+        <button role="tab" data-mode="line">Line integrals</button>
       </div>
       <div class="tab-group"><span class="tab-group-label">Practice</span>
         <button role="tab" data-mode="quiz">Quiz</button>
@@ -128,6 +129,32 @@
           <input id="ftc-x" type="range" min="-3" max="3" step="0.05" value="1">
           <output id="ftc-x-out">1</output>
         </label>
+      </div>
+
+      <div id="line-row" hidden>
+        <div class="options">
+          <label>Integral
+            <select id="l-kind">
+              <option value="work">Work / circulation  ∫ F · dr</option>
+              <option value="scalar">Scalar  ∫ f ds</option>
+            </select>
+          </label>
+          <label>Curve <select id="l-preset"></select></label>
+        </div>
+        <div class="options line-inputs">
+          <label>x(t) = <input id="l-x" type="text" autocomplete="off"></label>
+          <label>y(t) = <input id="l-y" type="text" autocomplete="off"></label>
+          <label>z(t) = <input id="l-z" type="text" autocomplete="off" placeholder="blank in 2D"></label>
+          <label>t from <input id="l-a" type="text" autocomplete="off" class="short"> to <input id="l-b" type="text" autocomplete="off" class="short"></label>
+        </div>
+        <div class="options line-inputs" id="l-vec">
+          <label>F = ⟨ P = <input id="l-P" type="text" autocomplete="off"></label>
+          <label>Q = <input id="l-Q" type="text" autocomplete="off"></label>
+          <label>R = <input id="l-R" type="text" autocomplete="off" placeholder="3D only"> ⟩</label>
+        </div>
+        <div class="options line-inputs" id="l-sc" hidden>
+          <label>f(x, y, z) = <input id="l-f" type="text" autocomplete="off"></label>
+        </div>
       </div>
 
       <div id="multi-row" hidden>

@@ -7,6 +7,7 @@ import { Graph } from './graph.js';
 import { Graph3D } from './graph3d.js';
 import { volume, solidSurfaces, SHAPES } from './volume.js';
 import { SYSTEMS, convert, applications, reverseOrder } from './multi.js';
+import { lineIntegral, PRESETS } from './line.js';
 import { fmt, recognize } from './solve.js';
 import { Stepper, flattenSteps, checkAntiderivative, checkValue, checkExpression, feedbackHTML } from './learn.js';
 import { differentiate } from './diff.js';
@@ -65,6 +66,16 @@ const EXAMPLES = {
     ['Average value of x² on [0, 3]', { kind: 'avg', f: 'x^2', a: '0', b: '3' }],
     ['Average value of sin x on [0, π]', { kind: 'avg', f: 'sin x', a: '0', b: 'pi' }],
     ['Average value of eˣ on [0, 1]', { kind: 'avg', f: 'e^x', a: '0', b: '1' }],
+  ],
+  line: [
+    ['Circulation of ⟨−y, x⟩ around the unit circle', { kind: 'work', preset: 'circle', P: '-y', Q: 'x' }],
+    ['Green\'s theorem: ⟨−y, x⟩ around an ellipse', { kind: 'work', preset: 'ellipse', P: '-y', Q: 'x' }],
+    ['Conservative ⟨2xy, x²⟩ along a parabola', { kind: 'work', preset: 'parabola', P: '2x y', Q: 'x^2' }],
+    ['Same field on a different path to (1, 1)', { kind: 'work', preset: '', x: 't^3', y: 't', a: '0', b: '1', P: '2x y', Q: 'x^2' }],
+    ['Work along a line segment', { kind: 'work', preset: 'segment', P: 'y', Q: 'x^2' }],
+    ['Scalar: ∫ x² ds on the unit circle', { kind: 'scalar', preset: 'circle', f: 'x^2' }],
+    ['Scalar: mass of a helix wire, density z', { kind: 'scalar', preset: 'helix', f: 'z' }],
+    ['3D: work of ⟨yz, xz, xy⟩ along a helix', { kind: 'work', preset: 'helix', P: 'y z', Q: 'x z', R: 'x y' }],
   ],
   multi: [
     ['Triple: box-like region', { f: 'x y z', layers: [['z', '0', '1'], ['y', '0', 'x'], ['x', '0', '2']] }],
@@ -587,7 +598,7 @@ function drawMappedRegion(L2, L1, toPlane, title, mark) {
   $('graph-title').textContent = title;
   showGraph({
     curves: [{ px: s => at(s, 1), color: '#15803d' }, { px: s => at(s, 0), color: '#dc2626' }],
-    view, xName: 'x', polys: [{ pts }],
+    view, xName: 'x', polys: [{ pts }], equalAspect: true,
     points: mark ? [{ x: mark[0], y: mark[1], label: 'center of mass' }] : [],
     hint: 'The region drawn in the xy-plane.',
   }, `<span><i style="background:#dc2626"></i>${M(`${symTex(w)} = ${toTex(L2.lo)}`)}</span><span><i style="background:#15803d"></i>${M(`${symTex(w)} = ${toTex(L2.hi)}`)}</span><span><i style="background:rgba(37,99,235,.35)"></i>region</span>`);
@@ -879,16 +890,136 @@ function runAverage() {
   }, `<span><i style="background:${COLORS.f}"></i>${M(`f(${vt}) = ${toTex(f)}`)}</span><span><i style="background:#f59e0b"></i>${M(`y = f_{\\text{avg}}`)}</span>`);
 }
 
+// ---------- line integrals ----------
+
+function readOpt(id, what, allowed) {
+  const src = $(id).value.trim();
+  if (!src) return null;
+  const n = simplify(parse(src));
+  const bad = [...freeSyms(n)].filter(v => !allowed.includes(v));
+  if (bad.length) throw new Error(`${what} can't use the letter ${bad[0]}.`);
+  return n;
+}
+
+function runLine() {
+  setMainVar('t');
+  const kind = $('l-kind').value;
+  const x = readOpt('l-x', 'x(t)', ['t']), y = readOpt('l-y', 'y(t)', ['t']), z = readOpt('l-z', 'z(t)', ['t']);
+  if (!x || !y) throw new Error('Fill in x(t) and y(t) for the curve.');
+  const comps = z ? [x, y, z] : [x, y];
+  const dims = comps.length;
+  const vars = dims === 3 ? ['x', 'y', 'z'] : ['x', 'y'];
+  const A = readBound('l-a', 'start value of t', { allowInf: false }), B = readBound('l-b', 'end value of t', { allowInf: false });
+  let f = null, F = null;
+  if (kind === 'scalar') {
+    f = readOpt('l-f', 'f', vars);
+    if (!f) throw new Error('Fill in the function f to integrate along the curve.');
+  } else {
+    F = ['l-P', 'l-Q', 'l-R'].slice(0, dims).map((id, i) => readOpt(id, ['P', 'Q', 'R'][i], vars));
+    if (F.some(c => !c)) throw new Error(dims === 3 ? 'Fill in P, Q and R for the vector field.' : 'Fill in P and Q for the vector field.');
+  }
+  const r = lineIntegral({ kind, comps, a: A, b: B, f, F });
+  const vec = list => `\\left\\langle ${list.map(toTex).join(',\\ ')} \\right\\rangle`;
+  const lhs = kind === 'scalar' ? '\\int_C f\\,ds' : (r.green && r.green.closed ? '\\oint_C \\mathbf{F}\\cdot d\\mathbf{r}' : '\\int_C \\mathbf{F}\\cdot d\\mathbf{r}');
+  const val = r.res.exact ? exactTex(r.res.exact, r.res.value) : valueTex(r.res.value);
+  state.check = { kind: 'value', value: r.res.value };
+  setAnswer(kind === 'scalar' ? 'Line integral (scalar)' : 'Line integral (work)', M(`${lhs} = ${val}`, true));
+  showSteps(r.res.anti ? r.res.anti.steps : null);
+  const range = `${boundShow(A)} \\le t \\le ${boundShow(B)}`;
+  let body = stage(1, 'Parametrize the curve', `<div class="math-line">${M(`\\mathbf{r}(t) = ${vec(comps)}, \\quad ${range}`, true)}</div>
+    <div class="math-line">${M(`\\mathbf{r}'(t) = ${vec(r.d)}`, true)}</div>`);
+  if (kind === 'scalar') {
+    body += stage(2, 'Write everything in terms of t', `<div class="math-line">${M(`ds = |\\mathbf{r}'(t)|\\,dt = \\sqrt{${toTex(r.speed2)}}\\,dt = ${toTex(r.speed)}\\,dt`, true)}</div>
+      <div class="math-line">${M(`f(\\mathbf{r}(t)) = ${toTex(r.fOn)}`, true)}</div>`);
+  } else {
+    body += stage(2, 'Write everything in terms of t', `<div class="math-line">${M(`\\mathbf{F}(\\mathbf{r}(t)) = ${vec(r.onC)}`, true)}</div>
+      <div class="math-line">${M(`\\mathbf{F}(\\mathbf{r}(t))\\cdot\\mathbf{r}'(t) = ${toTex(r.integrand)}`, true)}</div>`);
+  }
+  body += stage(3, 'Integrate', `<div class="math-line">${M(`${lhs} = \\int_{${boundShow(A)}}^{${boundShow(B)}} ${wrap(r.integrand)}\\,dt = ${val}`, true)}</div>`);
+  if (kind === 'work') {
+    const C = r.conservative;
+    const tests = C.tests.map(T => `<div class="math-line">${M(`${T.tex}: \\quad ${toTex(T.a)} ${C.ok ? '=' : '\\ \\text{vs}\\ '} ${toTex(T.b)}`, true)}</div>`).join('');
+    body += stage(4, 'Is the field conservative?', C.ok
+      ? `${tests}<p><b>Yes.</b> ${C.potential ? `A potential function is ${M(`\\varphi = ${toTex(C.potential)}`)} (so ${M('\\nabla\\varphi = \\mathbf{F}')}). By the Fundamental Theorem for line integrals,</p>
+         <div class="math-line">${M(`\\int_C \\mathbf{F}\\cdot d\\mathbf{r} = \\varphi(\\text{end}) - \\varphi(\\text{start}) = ${toTex(C.ends.B)} - ${wrap(C.ends.A)} = ${toTex(C.ends.value)}`, true)}</div>
+         <p>Any path with the same endpoints gives the same value${r.green && r.green.closed ? ', and around a closed curve the answer is 0' : ''}.</p>` : '<p>A potential function exists, but I could not write it down.</p>'}`
+      : `${tests}<p><b>No</b>, the cross-partials differ, so the value depends on the path taken.</p>`);
+    if (r.green && r.green.closed) {
+      const G = r.green;
+      body += stage(5, "Green's theorem", `<p>The curve is closed, so the circulation equals a double integral over the region ${M('D')} inside it:</p>
+        <div class="math-line">${M(`\\oint_C P\\,dx + Q\\,dy = \\iint_D \\left(\\frac{\\partial Q}{\\partial x} - \\frac{\\partial P}{\\partial y}\\right) dA = \\iint_D ${wrap(G.curl)}\\,dA`, true)}</div>
+        <div class="math-line">${M(`= ${G.exact ? exactTex(G.exact, G.value) : valueTex(G.value)}${G.clockwise ? '\\quad(\\text{curve is clockwise, so flip the sign})' : ''}`, true)}</div>
+        <p>${Math.abs((G.clockwise ? -G.value : G.value) - r.res.value) < 1e-6 * (1 + Math.abs(r.res.value)) ? '✓ Same as the line integral.' : 'This does not match; the region may not be a simple region.'}</p>`);
+    }
+  }
+  $('detail-card').innerHTML = `<h2>Line integral</h2>${body}`;
+  $('detail-card').hidden = false;
+
+  // pictures
+  const cx = compile(comps[0]), cy = compile(comps[1]), cz = z ? compile(z) : null;
+  const pt = tt => [cx({ t: tt }), cy({ t: tt })];
+  if (dims === 2) {
+    const n = 200, pts = Array.from({ length: n + 1 }, (_, i) => pt(A.value + (B.value - A.value) * i / n));
+    const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+    const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 1);
+    const mx = (Math.max(...xs) + Math.min(...xs)) / 2, my = (Math.max(...ys) + Math.min(...ys)) / 2;
+    const view = { x0: mx - span * 0.8, x1: mx + span * 0.8, y0: my - span * 0.8, y1: my + span * 0.8 };
+    const arrows = [];
+    // direction of travel
+    for (const q of [0.2, 0.45, 0.7, 0.95]) {
+      const t0 = A.value + (B.value - A.value) * q, h = (B.value - A.value) * 0.01;
+      const [x0, y0] = pt(t0), [x1, y1] = pt(t0 + h);
+      const len = Math.hypot(x1 - x0, y1 - y0) || 1;
+      arrows.push({ x: x0, y: y0, dx: (x1 - x0) / len * span * 0.06, dy: (y1 - y0) / len * span * 0.06, color: COLORS.f, width: 3, head: 10 });
+    }
+    if (F) {
+      const P = compile(F[0]), Q = compile(F[1]);
+      const k = 13, cell = (view.x1 - view.x0) / k;
+      const field = [];
+      for (let i = 0; i <= k; i++) for (let j = 0; j <= k; j++) {
+        const X = view.x0 + i * cell, Y = view.y0 + j * cell;
+        const u = P({ x: X, y: Y }), v = Q({ x: X, y: Y });
+        if (isFinite(u) && isFinite(v)) field.push({ X, Y, u, v, m: Math.hypot(u, v) });
+      }
+      const big = Math.max(...field.map(a => a.m), 1e-9);
+      field.forEach(a => { if (a.m > 0) arrows.unshift({ x: a.X, y: a.Y, dx: a.u / big * cell * 0.85, dy: a.v / big * cell * 0.85, color: '#94a3b8', head: 5 }); });
+    }
+    $('graph-title').textContent = F ? 'The curve in the vector field' : 'The curve';
+    showGraph({ curves: [{ px: tt => pt(A.value + (B.value - A.value) * tt), color: COLORS.f }], view, arrows, xName: 'x', equalAspect: true, hint: 'Blue arrows show the direction of travel along C.' },
+      `<span><i style="background:${COLORS.f}"></i>the curve C</span>${F ? '<span><i style="background:#94a3b8"></i>the field F</span>' : ''}`);
+    $('graph3d-card').hidden = true;
+  } else {
+    $('graph-card').hidden = true;
+    const n = 300, pts = Array.from({ length: n + 1 }, (_, i) => { const tt = A.value + (B.value - A.value) * i / n; return [cx({ t: tt }), cy({ t: tt }), cz({ t: tt })]; });
+    $('graph3d-card').hidden = false;
+    $('graph3d-title').textContent = 'The curve';
+    $('legend3d').innerHTML = `<span><i style="background:${COLORS.f}"></i>the curve C (arrow shows direction)</span>`;
+    graph3d.set({ lines: [{ pts, color: COLORS.f }], names: ['x', 'y', 'z'], equal: true });
+  }
+}
+
+function loadPreset(key) {
+  const p = PRESETS[key];
+  if (!p) return;
+  $('l-x').value = p.x; $('l-y').value = p.y; $('l-z').value = p.z; $('l-a').value = p.a; $('l-b').value = p.b;
+}
+
+function syncLineControls() {
+  const sc = $('l-kind').value === 'scalar';
+  $('l-vec').hidden = sc;
+  $('l-sc').hidden = !sc;
+}
+
 function showGraph(scene, legend) {
   $('graph-card').hidden = false;
-  if (state.mode !== 'multi' && state.mode !== 'volume') { if (state.mode !== 'ftc') $('graph-title').textContent = 'Graph'; $('graph3d-card').hidden = true; }
+  if (!['multi', 'volume', 'line'].includes(state.mode)) { if (state.mode !== 'ftc') $('graph-title').textContent = 'Graph'; $('graph3d-card').hidden = true; }
   $('legend').innerHTML = legend;
   graph.set(scene);
 }
 
 // ---------- mode switching, preview, events ----------
 
-const RUN = { indef: runIndefinite, def: runDefinite, riemann: runRiemann, area: runArea, volume: runVolume, ftc: runFtc, multi: runMulti };
+const RUN = { indef: runIndefinite, def: runDefinite, riemann: runRiemann, area: runArea, volume: runVolume, ftc: runFtc, multi: runMulti, line: runLine };
 
 const RESULT_CARDS = ['answer-card', 'detail-card', 'graph-card', 'graph3d-card'];
 
@@ -979,28 +1110,40 @@ function setMode(mode) {
   syncVolumeControls();
   $('riemann-row').hidden = mode !== 'riemann';
   $('multi-row').hidden = mode !== 'multi';
-  $('wrt-row').hidden = mode === 'multi';
+  $('line-row').hidden = mode !== 'line';
+  $('f').hidden = mode === 'line';
+  $('f-label').hidden = mode === 'line';
+  $('wrt-row').hidden = mode === 'multi' || mode === 'line';
+  if (mode === 'line') { syncLineControls(); if (!$('l-x').value) { $('l-preset').value = 'circle'; loadPreset('circle'); $('l-P').value = '-y'; $('l-Q').value = 'x'; } }
   $('area-hint').hidden = !['area', 'volume'].includes(mode);
   $('f-label').textContent = { indef: 'Integrand', def: 'Integrand', riemann: 'Function', area: 'Curves', volume: 'Region between the curves', ftc: 'Integrand', multi: 'Integrand' }[mode];
   $('f').placeholder = mode === 'area' ? 'first curve f(x), e.g.  x' : mode === 'multi' ? 'e.g.  x y z' : 'e.g.  x e^x    sin^2 x    1/(x^2 + 1)';
   $('examples').innerHTML = '<option value="">Choose an example…</option>' +
-    EXAMPLES[mode].map(([name, ex], i) => `<option value="${i}">${esc(name)}: ${esc(ex.f)}${ex.g ? ` and ${esc(ex.g)}` : ''}${ex.a ? ` on [${esc(ex.a)}, ${esc(ex.b)}]` : ''}</option>`).join('');
+    EXAMPLES[mode].map(([name, ex], i) => `<option value="${i}">${esc(name)}${ex.f !== undefined && mode !== 'line' ? `: ${esc(ex.f)}` : ''}${ex.g ? ` and ${esc(ex.g)}` : ''}${ex.a && mode !== 'line' ? ` on [${esc(ex.a)}, ${esc(ex.b)}]` : ''}</option>`).join('');
   if (mode === 'multi' && !$('layers').children.length) { syncCoords(); renderLayers(); }
   ['answer-card', 'detail-card', 'graph-card', 'graph3d-card'].forEach(id => { $(id).hidden = true; });
   $('error').hidden = true;
   updatePreview();
-  if ($('f').value.trim()) compute(true);
+  if ($('f').value.trim() || mode === 'line') compute(true);
 }
 
 function loadExample(i) {
   const ex = EXAMPLES[state.mode][i][1];
-  $('f').value = ex.f;
+  if (ex.f !== undefined) $('f').value = ex.f;
   $('g').value = ex.g || '';
   $('a').value = ex.a || '';
   $('b').value = ex.b || '';
   if (ex.layers) setLayers(ex.layers, ex.coords);
   if (state.mode === 'multi') $('m-app').value = ex.app || 'integral';
   $('wrt').value = ex.wrt || 'x';
+  if (state.mode === 'line') {
+    $('l-kind').value = ex.kind;
+    $('l-preset').value = ex.preset;
+    if (ex.preset) loadPreset(ex.preset);
+    else { $('l-x').value = ex.x; $('l-y').value = ex.y; $('l-z').value = ex.z || ''; $('l-a').value = ex.a; $('l-b').value = ex.b; }
+    for (const k of ['P', 'Q', 'R', 'f']) $(`l-${k}`).value = ex[k] || '';
+    syncLineControls();
+  }
   if (state.mode === 'ftc') {
     $('ftc-kind').value = ex.kind;
     $('ftc-x-wrap').hidden = ex.kind !== 'ftc1';
@@ -1021,6 +1164,16 @@ function updatePreview() {
   const pv = $('preview');
   try {
     const mode = state.mode;
+    if (mode === 'line') {
+      const t = id => { const v = $(id).value.trim(); if (!v) return '?'; try { return toTex(simplify(parse(v))); } catch { return '?'; } };
+      const z = $('l-z').value.trim();
+      const curve = `\\mathbf{r}(t) = \\left\\langle ${t('l-x')},\\ ${t('l-y')}${z ? `,\\ ${t('l-z')}` : ''} \\right\\rangle,\\ ${t('l-a')} \\le t \\le ${t('l-b')}`;
+      const integ = $('l-kind').value === 'scalar' ? `\\int_C ${t('l-f')}\\,ds`
+        : `\\int_C \\left\\langle ${t('l-P')},\\ ${t('l-Q')}${z ? `,\\ ${t('l-R')}` : ''} \\right\\rangle\\cdot d\\mathbf{r}`;
+      pv.className = 'preview';
+      pv.innerHTML = M(`${integ} \\quad\\text{along}\\quad ${curve}`, true);
+      return;
+    }
     const f = readExpr('f', 'the integrand');
     let v = 'x';
     try { v = readVar($('wrt').value.trim()); } catch { /* keep x */ }
@@ -1084,6 +1237,9 @@ function syncVolumeControls() {
 function init() {
   $('v-shape').innerHTML = Object.entries(SHAPES).map(([k, s]) => `<option value="${k}">${esc(s.name)}</option>`).join('');
   for (const id of ['v-kind', 'v-axis', 'v-method', 'v-shape']) $(id).addEventListener('change', () => { syncVolumeControls(); compute(true); });
+  $('l-preset').innerHTML = '<option value="">Custom curve</option>' + Object.entries(PRESETS).map(([k, p]) => `<option value="${k}">${esc(p.name)}</option>`).join('');
+  $('l-preset').addEventListener('change', e => { loadPreset(e.target.value); updatePreview(); compute(true); });
+  $('l-kind').addEventListener('change', () => { syncLineControls(); updatePreview(); compute(true); });
   $('ftc-kind').addEventListener('change', () => {
     const avg = $('ftc-kind').value === 'avg';
     $('ftc-x-wrap').hidden = avg;

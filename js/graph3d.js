@@ -18,7 +18,7 @@ export class Graph3D {
   // surfaces: [{ map: (s, t) => [x, y, z] for s, t in [0, 1], color: [r, g, b], n? }]
   // names: axis labels ['x', 'y', 'z']
   // equal: use one scale for all axes (solids of revolution must look round)
-  set({ surfaces, names, equal = false, points = [] }) {
+  set({ surfaces = [], names, equal = false, points = [], lines = [] }) {
     this.equal = equal;
     this.rawPoints = points;
     this.names = names;
@@ -42,6 +42,7 @@ export class Graph3D {
         raw.push({ q, color: S.color, front: !!S.front });
       }
     }
+    for (const L of lines) pts.push(...L.pts.filter(p => p.every(isFinite)));
     if (!pts.length) { this.quads = []; this.draw(); return; }
     const lo = [0, 1, 2].map(k => Math.min(...pts.map(p => p[k])));
     const hi = [0, 1, 2].map(k => Math.max(...pts.map(p => p[k])));
@@ -54,6 +55,7 @@ export class Graph3D {
     this.half = hi.map((h, k) => (h - lo[k]) / span[k] / 2 || 0.5);
     this.quads = raw.map(({ q, color, front }) => ({ q: q.map(norm), color, front }));
     this.points = points.map(p => ({ ...p, q: norm(p.at) }));
+    this.lines = lines.map(L => ({ ...L, q: L.pts.map(norm) }));
     this.yaw = -0.9; this.pitch = 0.45; this.zoom = 1;
     this.draw();
   }
@@ -90,7 +92,7 @@ export class Graph3D {
     const ctx = this.ctx;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, this.W, this.H);
-    if (!this.quads.length) { this.say('Nothing to draw.'); return; }
+    if (!this.quads.length && !(this.lines && this.lines.length)) { this.say('Nothing to draw.'); return; }
 
     this.drawBox(true);
     // light comes from the viewer's upper left
@@ -113,6 +115,17 @@ export class Graph3D {
       ctx.fill(); ctx.stroke();
     }
     this.drawBox(false);
+    for (const L of this.lines || []) {
+      ctx.strokeStyle = L.color || '#2563eb'; ctx.lineWidth = L.width || 3; ctx.beginPath();
+      L.q.forEach((p, i) => { const [X, Y] = this.project(p); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+      ctx.stroke();
+      // direction arrow halfway along
+      const k = Math.floor(L.q.length / 2), A = this.project(L.q[k]), B = this.project(L.q[Math.min(k + 2, L.q.length - 1)]);
+      const ang = Math.atan2(B[1] - A[1], B[0] - A[0]);
+      ctx.fillStyle = L.color || '#2563eb'; ctx.beginPath(); ctx.moveTo(B[0], B[1]);
+      ctx.lineTo(B[0] - 12 * Math.cos(ang - 0.45), B[1] - 12 * Math.sin(ang - 0.45));
+      ctx.lineTo(B[0] - 12 * Math.cos(ang + 0.45), B[1] - 12 * Math.sin(ang + 0.45)); ctx.closePath(); ctx.fill();
+    }
     for (const p of this.points || []) {
       const [X, Y] = this.project(p.q);
       ctx.fillStyle = '#0f172a'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;

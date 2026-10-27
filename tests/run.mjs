@@ -112,5 +112,17 @@ for (const rows of [[['y', 'x^2', 'x'], ['x', '0', '1']], [['y', '0', '1 - x^2']
   check(`reverse ${rows[0][1]}..${rows[0][2]}`, Math.abs(tot - iterated(P('1'), L(rows)).value) < 1e-6, true);
 }
 
+// line integrals
+const { lineIntegral } = await import('../js/line.js');
+setMainVar('t');
+const LI = o => lineIntegral({ a: B('0'), b: B('2pi'), ...o });
+const circ = LI({ kind: 'work', comps: [P('cos(t)'), P('sin(t)')], F: [P('-y'), P('x')] });
+check('circulation', toTex(circ.res.exact), '2 \\pi');
+check('green matches', Math.abs(circ.green.value - circ.res.value) < 1e-6, true);
+const par = lineIntegral({ kind: 'work', comps: [P('t'), P('t^2')], a: B('0'), b: B('1'), F: [P('2x y'), P('x^2')] });
+const other = lineIntegral({ kind: 'work', comps: [P('t^3'), P('t')], a: B('0'), b: B('1'), F: [P('2x y'), P('x^2')] });
+check('conservative path independence', `${toTex(par.res.exact)} ${toTex(other.res.exact)} ${toTex(par.conservative.potential)}`, '1 1 x^{2} y');
+check('scalar ds', toTex(LI({ kind: 'scalar', comps: [P('cos(t)'), P('sin(t)')], f: P('x^2') }).res.exact), '\\pi');
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

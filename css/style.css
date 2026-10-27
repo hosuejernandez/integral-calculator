@@ -300,3 +300,6 @@ canvas#graph { width: 100%; height: 100%; display: block; touch-action: none; cu
 #ftc-row label { display: flex; gap: 6px; align-items: center; font-weight: 600; flex-wrap: wrap; }
 #ftc-x { width: 160px; }
 #multi-row .options label { display: flex; gap: 6px; align-items: center; font-weight: 600; }
+#line-row label { display: flex; gap: 6px; align-items: center; font-weight: 600; flex-wrap: wrap; }
+.line-inputs input { width: 110px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.line-inputs input.short { width: 64px; }
