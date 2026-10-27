@@ -95,5 +95,22 @@ let threw = false;
 try { VOL({ f: P('x'), g: P('x^2'), kind: 'revolve', axis: { dir: 'h', k: P('1/2') } }); } catch { threw = true; }
 check('axis through region rejected', threw, true);
 
+// coordinate systems, applications, reversing the order
+const MU = await import('../js/multi.js');
+const { mul: MUL } = await import('../js/expr.js');
+const { pretty: PR } = await import('../js/simplify.js');
+const inSys = (f, sysName, rows) => { const sys = MU.SYSTEMS[sysName]; const conv = MU.convert(P(f), sys); return toTex(iterated(PR(sys.jac ? MUL([conv, sys.jac]) : conv), L(rows)).exact); };
+check('polar quarter disk', inSys('x^2 + y^2', 'polar', [['r', '0', '1'], ['theta', '0', 'pi/2']]), '\\frac{\\pi}{8}');
+check('spherical ball', inSys('1', 'spherical', [['rho', '0', '1'], ['phi', '0', 'pi'], ['theta', '0', '2pi']]), '\\frac{4 \\pi}{3}');
+check('cylinder', inSys('1', 'cylindrical', [['z', '0', '2'], ['r', '0', '1'], ['theta', '0', '2pi']]), '2 \\pi');
+check('spherical x^2+y^2+z^2', inSys('x^2 + y^2 + z^2', 'spherical', [['rho', '0', '1'], ['phi', '0', 'pi'], ['theta', '0', '2pi']]), '\\frac{4 \\pi}{5}');
+const cm = MU.applications('center', P('1'), L([['y', '0', 'x'], ['x', '0', '1']]), MU.SYSTEMS.cartesian2);
+check('centroid of triangle', cm.moments.map(m => m.res.value / cm.mass.value).map(v => v.toFixed(6)).join(','), '0.666667,0.333333');
+for (const rows of [[['y', 'x^2', 'x'], ['x', '0', '1']], [['y', '0', '1 - x^2'], ['x', '-1', '1']], [['y', '0', 'ln(x)'], ['x', '1', 'e']]]) {
+  const r = MU.reverseOrder(L(rows));
+  const tot = r.bands ? r.bands.reduce((t, B) => t + iterated(P('1'), B.layers).value, 0) : NaN;
+  check(`reverse ${rows[0][1]}..${rows[0][2]}`, Math.abs(tot - iterated(P('1'), L(rows)).value) < 1e-6, true);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

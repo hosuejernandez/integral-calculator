@@ -241,9 +241,11 @@ export function iterated(integrand, layers) {
   }
   const leftover = freeSyms(cur);
   const value = leftover.size ? NaN : compile(cur)({});
-  const check = numericIterated(integrand, layers, false);
+  // cheap numeric check first; a closer look only when it disagrees (square roots converge slowly)
+  let check = numericIterated(integrand, layers, false);
   if (!leftover.size && isFinite(check) && Math.abs(value - check) > 1e-6 * (1 + Math.abs(check))) {
-    return { steps, exact: null, value: check, mismatch: true };
+    check = numericIterated(integrand, layers, true);
+    if (Math.abs(value - check) > 1e-4 * (1 + Math.abs(check))) return { steps, exact: null, value: check, mismatch: true };
   }
   return { steps, exact: cur, value };
 }

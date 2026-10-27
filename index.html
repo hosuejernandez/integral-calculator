@@ -6,9 +6,9 @@
   <title>Integral Calculator</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=mvqyoh53">
-  <script type="importmap">{"imports":{"./js/app.js":"./js/app.js?v=mvqyoh53","./js/calculus.js":"./js/calculus.js?v=mvqyoh53","./js/diff.js":"./js/diff.js?v=mvqyoh53","./js/expr.js":"./js/expr.js?v=mvqyoh53","./js/graph.js":"./js/graph.js?v=mvqyoh53","./js/graph3d.js":"./js/graph3d.js?v=mvqyoh53","./js/integrate.js":"./js/integrate.js?v=mvqyoh53","./js/learn.js":"./js/learn.js?v=mvqyoh53","./js/quiz.js":"./js/quiz.js?v=mvqyoh53","./js/simplify.js":"./js/simplify.js?v=mvqyoh53","./js/solve.js":"./js/solve.js?v=mvqyoh53","./js/volume.js":"./js/volume.js?v=mvqyoh53"}}</script>
-  <script type="module" src="js/app.js?v=mvqyoh53"></script>
+  <link rel="stylesheet" href="css/style.css?v=mvqyun5j">
+  <script type="importmap">{"imports":{"./js/app.js":"./js/app.js?v=mvqyun5j","./js/calculus.js":"./js/calculus.js?v=mvqyun5j","./js/diff.js":"./js/diff.js?v=mvqyun5j","./js/expr.js":"./js/expr.js?v=mvqyun5j","./js/graph.js":"./js/graph.js?v=mvqyun5j","./js/graph3d.js":"./js/graph3d.js?v=mvqyun5j","./js/integrate.js":"./js/integrate.js?v=mvqyun5j","./js/learn.js":"./js/learn.js?v=mvqyun5j","./js/multi.js":"./js/multi.js?v=mvqyun5j","./js/quiz.js":"./js/quiz.js?v=mvqyun5j","./js/simplify.js":"./js/simplify.js?v=mvqyun5j","./js/solve.js":"./js/solve.js?v=mvqyun5j","./js/volume.js":"./js/volume.js?v=mvqyun5j"}}</script>
+  <script type="module" src="js/app.js?v=mvqyun5j"></script>
 </head>
 <body>
   <main>
@@ -138,6 +138,19 @@
               <option value="3" selected>Triple integral</option>
             </select>
           </label>
+          <label>Coordinates
+            <select id="coords"></select>
+          </label>
+          <label>Compute
+            <select id="m-app">
+              <option value="integral">the integral</option>
+              <option value="measure">area / volume of the region</option>
+              <option value="mass">mass (integrand = density)</option>
+              <option value="center">center of mass (integrand = density)</option>
+              <option value="average">average value of the integrand</option>
+            </select>
+          </label>
+          <button id="reverse" class="ghost">Reverse the order</button>
         </div>
         <p class="hint">Rows go from the <b>inside out</b>. Inner bounds may use the outer variables (for example y from 0 to x).</p>
         <div class="layers" id="layers"></div>

@@ -18,8 +18,9 @@ export class Graph3D {
   // surfaces: [{ map: (s, t) => [x, y, z] for s, t in [0, 1], color: [r, g, b], n? }]
   // names: axis labels ['x', 'y', 'z']
   // equal: use one scale for all axes (solids of revolution must look round)
-  set({ surfaces, names, equal = false }) {
+  set({ surfaces, names, equal = false, points = [] }) {
     this.equal = equal;
+    this.rawPoints = points;
     this.names = names;
     const pts = [];
     const raw = [];
@@ -52,6 +53,7 @@ export class Graph3D {
     const norm = p => p.map((v, k) => (v - mids[k]) / span[k]);
     this.half = hi.map((h, k) => (h - lo[k]) / span[k] / 2 || 0.5);
     this.quads = raw.map(({ q, color, front }) => ({ q: q.map(norm), color, front }));
+    this.points = points.map(p => ({ ...p, q: norm(p.at) }));
     this.yaw = -0.9; this.pitch = 0.45; this.zoom = 1;
     this.draw();
   }
@@ -111,6 +113,12 @@ export class Graph3D {
       ctx.fill(); ctx.stroke();
     }
     this.drawBox(false);
+    for (const p of this.points || []) {
+      const [X, Y] = this.project(p.q);
+      ctx.fillStyle = '#0f172a'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(X, Y, 6, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+      if (p.label) { ctx.font = '600 12px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(p.label, X + 9, Y); }
+    }
     this.say(this.equal ? 'Drag to rotate, scroll to zoom.' : 'Drag to rotate, scroll to zoom. Each axis is scaled to fit, so shapes may look stretched.');
   }
 

@@ -1,11 +1,12 @@
 // Page wiring for the integral calculator.
-import { parse, toTex, freeSyms, compile, symTex, num, mul, pow, sub, substitute } from './expr.js';
+import { parse, toTex, freeSyms, compile, symTex, num, mul, pow, sub, substitute, key } from './expr.js';
 import { simplify, setMainVar, pretty } from './simplify.js';
 import { integrate } from './integrate.js';
 import { definite, riemann, areaBetween, iterated, boundTex, niceTex, fnOf, intersections, quad } from './calculus.js';
 import { Graph } from './graph.js';
 import { Graph3D } from './graph3d.js';
 import { volume, solidSurfaces, SHAPES } from './volume.js';
+import { SYSTEMS, convert, applications, reverseOrder } from './multi.js';
 import { fmt, recognize } from './solve.js';
 import { Stepper, flattenSteps, checkAntiderivative, checkValue, checkExpression, feedbackHTML } from './learn.js';
 import { differentiate } from './diff.js';
@@ -71,6 +72,16 @@ const EXAMPLES = {
     ['Double: rectangle', { f: 'x^2 y', layers: [['y', '0', '3'], ['x', '1', '2']] }],
     ['Double: triangle', { f: 'x + y', layers: [['y', '0', 'x'], ['x', '0', '1']] }],
     ['Double: quarter disk (numeric)', { f: 'x^2 + y^2', layers: [['y', '0', 'sqrt(1 - x^2)'], ['x', '0', '1']] }],
+    ['Polar: the same quarter disk, exactly', { f: 'x^2 + y^2', coords: 'polar', layers: [['r', '0', '1'], ['theta', '0', 'pi/2']] }],
+    ['Polar: area of a cardioid', { f: '1', app: 'measure', coords: 'polar', layers: [['r', '0', '1 + cos(theta)'], ['theta', '0', '2pi']] }],
+    ['Cylindrical: volume of a cylinder', { f: '1', app: 'measure', coords: 'cylindrical', layers: [['z', '0', '3'], ['r', '0', '2'], ['theta', '0', '2pi']] }],
+    ['Cylindrical: under a paraboloid', { f: 'z', coords: 'cylindrical', layers: [['z', '0', '4 - r^2'], ['r', '0', '2'], ['theta', '0', '2pi']] }],
+    ['Spherical: volume of a ball', { f: '1', app: 'measure', coords: 'spherical', layers: [['rho', '0', '2'], ['phi', '0', 'pi'], ['theta', '0', '2pi']] }],
+    ['Spherical: ∭(x² + y² + z²) dV over the unit ball', { f: 'x^2 + y^2 + z^2', coords: 'spherical', layers: [['rho', '0', '1'], ['phi', '0', 'pi'], ['theta', '0', '2pi']] }],
+    ['Center of mass of a triangle (density 1)', { f: '1', app: 'center', layers: [['y', '0', 'x'], ['x', '0', '1']] }],
+    ['Mass with density x + y', { f: 'x + y', app: 'mass', layers: [['y', '0', '1 - x'], ['x', '0', '1']] }],
+    ['Center of mass of a half disk (polar)', { f: '1', app: 'center', coords: 'polar', layers: [['r', '0', '1'], ['theta', '0', 'pi']] }],
+    ['Reverse the order: y from x² to x', { f: '1', app: 'measure', layers: [['y', 'x^2', 'x'], ['x', '0', '1']] }],
   ],
 };
 
@@ -349,14 +360,29 @@ function runArea() {
   }, `<span><i style="background:${COLORS.f}"></i>${M(F)}</span><span><i style="background:${COLORS.g}"></i>${M(G)}</span><span><i style="background:rgba(37,99,235,.35)"></i>region</span>`);
 }
 
-function renderLayers() {
+const CART_DEFAULTS = { 2: [['y', '0', '1'], ['x', '0', '1']], 3: [['z', '0', '1'], ['y', '0', '1'], ['x', '0', '1']] };
+const sysOf = () => SYSTEMS[$('coords').value] || SYSTEMS[+$('dims').value === 3 ? 'cartesian3' : 'cartesian2'];
+
+function syncCoords() {
   const dims = +$('dims').value;
+  const keep = $('coords').value;
+  const opts = dims === 3 ? ['cartesian3', 'cylindrical', 'spherical'] : ['cartesian2', 'polar'];
+  $('coords').innerHTML = opts.map(k => `<option value="${k}">${SYSTEMS[k].name}</option>`).join('');
+  $('coords').value = opts.includes(keep) ? keep : opts[0];
+  $('reverse').hidden = !(dims === 2 && $('coords').value === 'cartesian2');
+}
+
+function renderLayers(force = false) {
+  const sys = sysOf();
+  const dims = sys.dims;
   const box = $('layers');
+  const same = box.dataset.sys === $('coords').value;
   const old = [...box.querySelectorAll('.layer')].map(row => [...row.querySelectorAll('input')].map(i => i.value));
-  const defaults = dims === 3 ? [['z', '0', '1'], ['y', '0', '1'], ['x', '0', '1']] : [['y', '0', '1'], ['x', '0', '1']];
+  const defaults = sys.defaults || CART_DEFAULTS[dims];
   const names = dims === 3 ? ['inner', 'middle', 'outer'] : ['inner', 'outer'];
+  box.dataset.sys = $('coords').value;
   box.innerHTML = defaults.map((d, i) => {
-    const vals = old.length === dims ? old[i] : d;
+    const vals = !force && same && old.length === dims ? old[i] : d;
     return `<div class="layer"><span class="tag neither">${names[i]}</span>
       <label>d<input class="var" type="text" value="${esc(vals[0])}" data-k="v" autocomplete="off"></label>
       <label>from <input type="text" value="${esc(vals[1])}" data-k="lo" autocomplete="off"></label>
@@ -364,10 +390,12 @@ function renderLayers() {
   }).join('');
 }
 
-function setLayers(list) {
+function setLayers(list, coords) {
   $('dims').value = String(list.length);
-  $('layers').innerHTML = '';
-  renderLayers();
+  syncCoords();
+  $('coords').value = coords || (list.length === 3 ? 'cartesian3' : 'cartesian2');
+  syncCoords();
+  renderLayers(true);
   [...$('layers').querySelectorAll('.layer')].forEach((row, i) => {
     const inputs = row.querySelectorAll('input');
     list[i].forEach((val, k) => { inputs[k].value = val; });
@@ -384,6 +412,10 @@ function readLayers() {
   });
   const vars = layers.map(L => L.v);
   if (new Set(vars).size !== vars.length) throw new Error('Each layer needs a different variable.');
+  const sys = sysOf();
+  if (sys.subs && [...sys.vars].sort().join() !== [...vars].sort().join()) {
+    throw new Error(`${sys.name} coordinates use the variables ${sys.vars.map(v => (v === 'theta' ? 'θ' : v === 'phi' ? 'φ' : v === 'rho' ? 'ρ' : v)).join(', ')}. Type theta, phi, rho (or θ, φ, ρ).`);
+  }
   layers.forEach((L, i) => {
     const outer = vars.slice(i + 1);
     for (const s of [...freeSyms(L.lo), ...freeSyms(L.hi)]) {
@@ -393,137 +425,253 @@ function readLayers() {
   return layers;
 }
 
-function runMulti() {
-  const f = readExpr('f', 'the integrand');
-  const layers = readLayers();
-  const extra = [...freeSyms(f)].filter(s => !layers.some(L => L.v === s));
-  if (extra.length) throw new Error(`The integrand uses ${extra[0]}, which is not one of the integration variables.`);
-  setMainVar(layers[layers.length - 1].v);
-  const r = iterated(f, layers);
-  state.check = { kind: 'value', value: r.value };
-  const ints = [...layers].reverse().map(L => `\\int_{${toTex(L.lo)}}^{${toTex(L.hi)}}`).join('');
-  const ds = layers.map(L => `d${symTex(L.v)}`).join('\\,');
-  const full = `${ints} ${wrap(f)}\\,${ds}`;
-  setAnswer(layers.length === 3 ? 'Triple integral' : 'Double integral',
-    M(`${full} = ${r.exact ? exactTex(r.exact, r.value) : valueTex(r.value)}`, true) +
-    (r.exact ? '' : `<p class="answer-note">Numeric value (Gauss–Legendre quadrature).${closeTo(r.value)}</p>`));
-  showSteps(null);
-  const body = r.steps.map((s, i) => {
+const intsTex = layers => [...layers].reverse().map(L => `\\int_{${toTex(L.lo)}}^{${toTex(L.hi)}}`).join('');
+const dsTex = layers => layers.map(L => `d${symTex(L.v)}`).join('\\,');
+
+function layerStages(r, layers, start) {
+  return r.steps.map((s, i) => {
     const others = layers.filter(L => L.v !== s.v).map(L => symTex(L.v));
     const hold = others.length ? `Treat ${others.map(o => M(o)).join(' and ')} as constant${others.length > 1 ? 's' : ''}.` : '';
     const title = `Integrate with respect to ${M(symTex(s.v))}`;
-    if (s.failed) return stage(i + 1, title, `<p>${hold}</p><div class="math-line">${M(`\\int_{${toTex(s.lo)}}^{${toTex(s.hi)}} ${wrap(s.integrand)}\\,d${symTex(s.v)}`, true)}</div><p>${esc(NO_ANTI)} The rest is computed numerically.</p>`);
-    return stage(i + 1, title,
+    if (s.failed) return stage(start + i, title, `<p>${hold}</p><div class="math-line">${M(`\\int_{${toTex(s.lo)}}^{${toTex(s.hi)}} ${wrap(s.integrand)}\\,d${symTex(s.v)}`, true)}</div><p>${esc(NO_ANTI)} The rest is computed numerically.</p>`);
+    return stage(start + i, title,
       `<p>${hold}</p>
        <div class="math-line">${M(`\\int_{${toTex(s.lo)}}^{${toTex(s.hi)}} ${wrap(s.integrand)}\\,d${symTex(s.v)} = \\Big[ ${toTex(s.F)} \\Big]_{${symTex(s.v)} = ${toTex(s.lo)}}^{${toTex(s.hi)}}`, true)}</div>
        <div class="math-line">${M(`= \\left(${toTex(s.upper)}\\right) - \\left(${toTex(s.lower)}\\right) = ${toTex(s.result)}`, true)}</div>
        <details class="mini"><summary>Steps for the antiderivative</summary><div class="steps">${stepTree(s.antiSteps)}</div></details>`);
   }).join('');
-  $('detail-card').innerHTML = `<h2>Integrate from the inside out</h2>${r.mismatch ? '<p class="note">The exact steps did not match a numeric check, so the numeric value is shown.</p>' : ''}${body}`;
+}
+const resTex = r => (r.exact ? exactTex(r.exact, r.value) : valueTex(r.value));
+
+function runMulti() {
+  const sys = sysOf();
+  const app = $('m-app').value;
+  const layers = readLayers();
+  const dims = layers.length;
+  const f = app === 'measure' ? num(1) : readExpr('f', app === 'mass' || app === 'center' ? 'the density' : 'the integrand');
+  const allowed = new Set([...layers.map(L => L.v), ...(sys.subs ? ['x', 'y', 'z'] : [])]);
+  const extra = [...freeSyms(f)].filter(s => !allowed.has(s));
+  if (extra.length) throw new Error(`The integrand uses ${extra[0]}, which is not one of the integration variables.`);
+  setMainVar(layers[dims - 1].v);
+  const conv = convert(f, sys);
+  const full = pretty(sys.jac ? mul([conv, sys.jac]) : conv);
+  const dA = dims === 3 ? 'dV' : 'dA';
+  const region = dims === 3 ? 'E' : 'R';
+  const set = `${'\\iint'.replace('ii', dims === 3 ? 'iii' : 'ii')}_{${region}}`;
+  // change of coordinates explanation
+  let coordStage = '';
+  if (sys.subs) {
+    coordStage = stage(1, `Change to ${sys.name.toLowerCase()} coordinates`,
+      `<div class="math-line">${M(sys.subsTex, true)}</div>
+       ${key(conv) !== key(f) ? `<p>The integrand becomes</p><div class="math-line">${M(`${toTex(f)} = ${toTex(conv)}`, true)}</div>` : ''}
+       <p>The area/volume element picks up the Jacobian:</p><div class="math-line">${M(sys.jacTex, true)}</div>
+       <div class="math-line">${M(`${intsTex(layers)} ${wrap(conv)}\\cdot ${wrap(sys.jac)}\\,${dsTex(layers)} = ${intsTex(layers)} ${wrap(full)}\\,${dsTex(layers)}`, true)}</div>`);
+  }
+  const offset = sys.subs ? 2 : 1;
+  let marker = null, answerHTML, detailTitle = 'Integrate from the inside out', body = '', mainR;
+  const titleBase = dims === 3 ? 'Triple integral' : 'Double integral';
+  if (app === 'center') {
+    const res = applications('center', f, layers, sys);
+    const M0 = res.mass;
+    mainR = M0;
+    const coords = res.moments.map(m => {
+      const exact = M0.exact && m.res.exact ? pretty(mul([m.res.exact, pow(M0.exact, num(-1))])) : null;
+      return { axis: m.axis, exact, value: m.res.value / M0.value, mom: m.res };
+    });
+    const point = `\\left(${coords.map(c => (c.exact ? toTex(c.exact) : fmt(c.value))).join(',\\ ')}\\right)`;
+    answerHTML = M(`(\\bar{x},\\ \\bar{y}${dims === 3 ? ',\\ \\bar{z}' : ''}) = ${point}`, true) +
+      (coords.some(c => !c.exact || c.exact.type !== 'num') ? `<p class="answer-note">≈ (${coords.map(c => fmt(c.value)).join(', ')})</p>` : '');
+    state.check = null;
+    marker = coords.map(c => c.value);
+    detailTitle = 'Center of mass';
+    body = stage(offset, 'Mass', `<div class="math-line">${M(`M = ${set} \\rho\\,${dA} = ${resTex(M0)}`, true)}</div>`) +
+      stage(offset + 1, 'Moments and the center', coords.map(c => `<div class="math-line">${M(`\\bar{${c.axis}} = \\frac{1}{M}${set} ${c.axis}\\,\\rho\\,${dA} = \\frac{${resTex(c.mom).replace(/\\approx.*/, '')}}{${resTex(M0).replace(/\\approx.*/, '')}} = ${c.exact ? exactTex(c.exact, c.value) : valueTex(c.value)}`, true)}</div>`).join('')) +
+      `<details class="mini"><summary>Steps for the mass integral</summary>${layerStages(M0, layers, offset + 2)}</details>`;
+  } else if (app === 'average') {
+    const res = applications('average', f, layers, sys);
+    const T = res.total, A = res.measure;
+    mainR = T;
+    const exact = T.exact && A.exact ? pretty(mul([T.exact, pow(A.exact, num(-1))])) : null;
+    const value = T.value / A.value;
+    answerHTML = M(`f_{\\text{avg}} = ${exact ? exactTex(exact, value) : valueTex(value)}`, true);
+    state.check = { kind: 'value', value };
+    detailTitle = 'Average value over the region';
+    body = stage(offset, 'Size of the region', `<div class="math-line">${M(`${dims === 3 ? 'V' : 'A'} = ${set} 1\\,${dA} = ${resTex(A)}`, true)}</div>`) +
+      stage(offset + 1, 'Integral of the function', `<div class="math-line">${M(`${set} f\\,${dA} = ${resTex(T)}`, true)}</div>`) +
+      stage(offset + 2, 'Divide', `<div class="math-line">${M(`f_{\\text{avg}} = \\frac{1}{${dims === 3 ? 'V' : 'A'}}${set} f\\,${dA} = ${exact ? exactTex(exact, value) : valueTex(value)}`, true)}</div>`) +
+      `<details class="mini"><summary>Steps for the integral of the function</summary>${layerStages(T, layers, offset + 3)}</details>`;
+  } else {
+    const r = iterated(full, layers);
+    mainR = r;
+    state.check = { kind: 'value', value: r.value };
+    const lhs = app === 'measure' ? (dims === 3 ? 'V' : 'A') : app === 'mass' ? 'M' : `${intsTex(layers)} ${wrap(f)}\\,${sys.subs ? dA : dsTex(layers)}`;
+    answerHTML = M(`${lhs} = ${resTex(r)}`, true) + (r.exact ? '' : `<p class="answer-note">Numeric value (Gauss–Legendre quadrature).${closeTo(r.value)}</p>`);
+    if (r.mismatch) body += '<p class="note">The exact steps did not match a numeric check, so the numeric value is shown.</p>';
+    body += layerStages(r, layers, offset);
+  }
+  const answerTitle = { integral: titleBase, measure: dims === 3 ? 'Volume' : 'Area', mass: 'Mass', center: 'Center of mass', average: 'Average value' }[app];
+  setAnswer(answerTitle, answerHTML);
+  showSteps(null);
+  $('detail-card').innerHTML = `<h2>${detailTitle}</h2>${coordStage}${body}`;
   $('detail-card').hidden = false;
-  drawMulti(f, layers);
+  state.multi = { layers, sys };
+  drawMulti(conv, layers, sys, marker);
+  void mainR;
 }
 
 // ---------- pictures for double and triple integrals ----------
 
-// The region in the plane of the two outermost variables, shaded with strips the way the
-// bounds describe it: vertical strips when the inner of the two is graphed up and down.
-function drawRegion(L2, L1, title) {
-  const u = L1.v, w = L2.v;                          // outer, inner
-  const a = compile(L1.lo)({}), b = compile(L1.hi)({});
-  const loC = compile(L2.lo), hiC = compile(L2.hi);
-  const lo = x => loC({ [u]: x }), hi = x => hiC({ [u]: x });
+// Region of a Cartesian double integral, drawn with strips the way the bounds describe it.
+// pairs: [[inner, outer], ...] — more than one pair after reversing the order.
+function drawRegion(pairs, title, mark) {
+  const all = pairs.map(([L2, L1]) => {
+    const u = L1.v, w = L2.v;
+    const a = compile(L1.lo)({}), b = compile(L1.hi)({});
+    const loC = compile(L2.lo), hiC = compile(L2.hi);
+    return { L1, L2, u, w, a, b, lo: x => loC({ [u]: x }), hi: x => hiC({ [u]: x }) };
+  });
+  const { u, w } = all[0];
   const pair = new Set([u, w]);
-  const horiz = pair.has('x') && pair.has('y') ? 'x' : u; // horizontal axis variable
+  const horiz = pair.has('x') && pair.has('y') ? 'x' : u;
   const vertStrips = horiz === u;
-  const ut = symTex(u), wt = symTex(w);
-  // bounding box of the region
   const xs = [], ys = [];
-  for (let i = 0; i <= 200; i++) {
-    const t = a + (b - a) * i / 200;
-    for (const val of [lo(t), hi(t)]) if (isFinite(val)) { (vertStrips ? xs : ys).push(t); (vertStrips ? ys : xs).push(val); }
+  for (const R of all) for (let i = 0; i <= 200; i++) {
+    const t = R.a + (R.b - R.a) * i / 200;
+    for (const val of [R.lo(t), R.hi(t)]) if (isFinite(val)) { (vertStrips ? xs : ys).push(t); (vertStrips ? ys : xs).push(val); }
   }
   const box = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
   const pad = k => Math.max((box[k + 1] - box[k]) * 0.25, 0.5);
   const view = { x0: box[0] - pad(0), x1: box[1] + pad(0), y0: box[2] - pad(2), y1: box[3] + pad(2) };
-  const red = '#dc2626', green = '#15803d';
-  const curves = vertStrips
-    ? [{ f: lo, color: red }, { f: hi, color: green },
-       { px: t => [a, lo(a) + (hi(a) - lo(a)) * t], color: '#64748b', width: 2, dash: [5, 4] },
-       { px: t => [b, lo(b) + (hi(b) - lo(b)) * t], color: '#64748b', width: 2, dash: [5, 4] }]
-    : [{ px: t => [lo(t), t], t0: a, t1: b, color: red }, { px: t => [hi(t), t], t0: a, t1: b, color: green },
-       { px: t => [lo(a) + (hi(a) - lo(a)) * t, a], color: '#64748b', width: 2, dash: [5, 4] },
-       { px: t => [lo(b) + (hi(b) - lo(b)) * t, b], color: '#64748b', width: 2, dash: [5, 4] }];
-  // keep plain function curves from drawing outside [a, b]
-  if (vertStrips) curves.slice(0, 2).forEach(cv => { const g = cv.f; cv.f = x => (x >= a && x <= b ? g(x) : NaN); });
+  const red = '#dc2626', green = '#15803d', grey = '#64748b';
+  const curves = [], shade = [];
+  for (const R of all) {
+    const { a, b, lo, hi } = R;
+    if (vertStrips) {
+      curves.push({ px: t => [t, lo(t)], t0: a, t1: b, color: red }, { px: t => [t, hi(t)], t0: a, t1: b, color: green },
+        { px: t => [a, lo(a) + (hi(a) - lo(a)) * t], color: grey, width: 2, dash: [5, 4] },
+        { px: t => [b, lo(b) + (hi(b) - lo(b)) * t], color: grey, width: 2, dash: [5, 4] });
+      shade.push({ top: hi, bottom: lo, a, b, signed: false });
+    } else {
+      curves.push({ px: t => [lo(t), t], t0: a, t1: b, color: red }, { px: t => [hi(t), t], t0: a, t1: b, color: green },
+        { px: t => [lo(a) + (hi(a) - lo(a)) * t, a], color: grey, width: 2, dash: [5, 4] },
+        { px: t => [lo(b) + (hi(b) - lo(b)) * t, b], color: grey, width: 2, dash: [5, 4] });
+      shade.push({ horizontal: true, left: lo, right: hi, c: a, d: b });
+    }
+  }
+  $('graph-title').textContent = title;
+  const legend = all.length === 1
+    ? `<span><i style="background:${red}"></i>lower bound ${M(`${symTex(w)} = ${toTex(all[0].L2.lo)}`)}</span>` +
+      `<span><i style="background:${green}"></i>upper bound ${M(`${symTex(w)} = ${toTex(all[0].L2.hi)}`)}</span>` +
+      `<span><i style="background:${grey}"></i>${M(`${symTex(u)} = ${toTex(all[0].L1.lo)}`)} and ${M(`${symTex(u)} = ${toTex(all[0].L1.hi)}`)}</span>`
+    : `<span><i style="background:${red}"></i>lower bounds</span><span><i style="background:${green}"></i>upper bounds</span><span><i style="background:${grey}"></i>band edges</span>`;
+  showGraph({
+    curves, view, xName: horiz, shade,
+    points: mark ? [{ x: mark[0], y: mark[1], label: 'center of mass' }] : [],
+    hint: vertStrips ? `Each vertical strip runs from the red curve up to the green curve.` : `Each horizontal strip runs from the red curve to the green curve.`,
+  }, legend + `<span><i style="background:rgba(37,99,235,.35)"></i>region</span>`);
+}
+
+// Region drawn by mapping the parameter rectangle through a coordinate change (polar regions).
+function drawMappedRegion(L2, L1, toPlane, title, mark) {
+  const u = L1.v, w = L2.v;
+  const a = compile(L1.lo)({}), b = compile(L1.hi)({});
+  const loC = compile(L2.lo), hiC = compile(L2.hi);
+  const at = (s, r) => { const uu = a + (b - a) * s; const env = { [u]: uu }; const lo = loC(env), hi = hiC(env); env[w] = lo + (hi - lo) * r; return toPlane(env); };
+  const n = 120, pts = [];
+  for (let i = 0; i <= n; i++) pts.push(at(i / n, 1));
+  for (let i = n; i >= 0; i--) pts.push(at(i / n, 0));
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 1);
+  const cx = (Math.max(...xs) + Math.min(...xs)) / 2, cy = (Math.max(...ys) + Math.min(...ys)) / 2;
+  const view = { x0: cx - span * 0.75, x1: cx + span * 0.75, y0: cy - span * 0.75, y1: cy + span * 0.75 };
   $('graph-title').textContent = title;
   showGraph({
-    curves, view, xName: horiz,
-    shade: [vertStrips ? { top: hi, bottom: lo, a, b, signed: false } : { horizontal: true, left: lo, right: hi, c: a, d: b }],
-    hint: vertStrips
-      ? `Each vertical strip runs from the red curve up to the green curve; ${ut} sweeps from ${fmt(a)} to ${fmt(b)}.`
-      : `Each horizontal strip runs from the red curve to the green curve; ${ut} sweeps from ${fmt(a)} to ${fmt(b)}.`,
-  }, `<span><i style="background:${red}"></i>lower bound ${M(`${wt} = ${toTex(L2.lo)}`)}</span>` +
-     `<span><i style="background:${green}"></i>upper bound ${M(`${wt} = ${toTex(L2.hi)}`)}</span>` +
-     `<span><i style="background:#64748b"></i>${M(`${ut} = ${toTex(L1.lo)}`)} and ${M(`${ut} = ${toTex(L1.hi)}`)}</span>` +
-     `<span><i style="background:rgba(37,99,235,.35)"></i>region</span>`);
+    curves: [{ px: s => at(s, 1), color: '#15803d' }, { px: s => at(s, 0), color: '#dc2626' }],
+    view, xName: 'x', polys: [{ pts }],
+    points: mark ? [{ x: mark[0], y: mark[1], label: 'center of mass' }] : [],
+    hint: 'The region drawn in the xy-plane.',
+  }, `<span><i style="background:#dc2626"></i>${M(`${symTex(w)} = ${toTex(L2.lo)}`)}</span><span><i style="background:#15803d"></i>${M(`${symTex(w)} = ${toTex(L2.hi)}`)}</span><span><i style="background:rgba(37,99,235,.35)"></i>region</span>`);
 }
 
 const TOP = [37, 99, 235], BOTTOM = [13, 148, 136], WALL = [147, 197, 253];
 
-function drawMulti(f, layers) {
+function drawMulti(conv, layers, sys, mark) {
   const n = layers.length;
   const outer = layers[n - 1], mid = layers[n - 2];
   const u = outer.v, w = mid.v;
   const a = compile(outer.lo)({}), b = compile(outer.hi)({});
   const wLo = compile(mid.lo), wHi = compile(mid.hi);
-  const env = {};
-  const U = s => a + (b - a) * s;
-  const W = (uu, r) => { env[u] = uu; const l = wLo(env), h = wHi(env); return l + (h - l) * r; };
+  const envAt = (s, r) => { const env = { [u]: a + (b - a) * s }; const l = wLo(env), h = wHi(env); env[w] = l + (h - l) * r; return env; };
+  const cart = !sys.toXYZ;
+  // where a point with these coordinate values sits in the xy-plane (double) or space (triple)
+  const plane2 = env => (cart ? [env.x !== undefined ? env.x : env[u], env.y !== undefined ? env.y : env[w]] : sys.toXYZ(env));
+  if (n === 2 || !sys.toXYZ || sys.vars.includes('z')) {
+    const title = n === 3 ? 'Shadow of the solid in the xy-plane' : 'Region of integration';
+    if (cart) drawRegion([[mid, outer]], title, mark);
+    else drawMappedRegion(mid, outer, env => sys.toXYZ(env).slice(0, 2), title, mark);
+  } else $('graph-card').hidden = true;
 
-  drawRegion(mid, outer, n === 3 ? `Shadow of the solid in the ${u}${w}-plane` : 'Region of integration');
-
-  let names, place, bottom, top, legend;
+  let surfaces, names = ['x', 'y', 'z'], legend;
+  const surf = (map, color) => ({ map, color });
   if (n === 2) {
-    // volume under z = f over the region
-    const F = compile(f);
-    const pair = new Set([u, w]);
-    const [iu, iw] = pair.has('x') && pair.has('y') ? [u === 'x' ? 0 : 1, w === 'x' ? 0 : 1] : [0, 1];
-    names = []; names[iu] = u; names[iw] = w; names[2] = 'z';
-    place = (uu, ww, t) => { const p = []; p[iu] = uu; p[iw] = ww; p[2] = t; return p; };
-    bottom = () => 0;
-    top = (uu, ww) => { env[u] = uu; env[w] = ww; return F(env); };
+    const F = compile(conv);
+    const P = (env, h) => { const [X, Y] = plane2(env); return [X, Y, h]; };
+    const top = env => F(env);
+    surfaces = [
+      surf((s, r) => { const e = envAt(s, r); return P(e, top(e)); }, TOP),
+      surf((s, r) => P(envAt(s, r), 0), BOTTOM),
+      ...[0, 1].map(edge => surf((s, t) => { const e = envAt(s, edge); return P(e, top(e) * t); }, WALL)),
+      ...[0, 1].map(edge => surf((s, t) => { const e = envAt(edge, s); return P(e, top(e) * t); }, WALL)),
+    ];
+    if (cart) names = [u === 'y' || w === 'x' ? w : u, u === 'y' || w === 'x' ? u : w, 'z'];
     $('graph3d-title').textContent = 'Volume under the surface';
-    legend = `<span><i style="background:rgb(${TOP})"></i>surface ${M(`z = ${toTex(f)}`)}</span>` +
-      `<span><i style="background:rgb(${BOTTOM})"></i>region in the ${u}${w}-plane</span>` +
-      `<span>The double integral is the signed volume between them.</span>`;
+    legend = `<span><i style="background:rgb(${TOP})"></i>surface ${M(`z = ${toTex(conv)}`)}</span><span><i style="background:rgb(${BOTTOM})"></i>the region</span><span>The double integral is the signed volume between them.</span>`;
   } else {
     const inner = layers[0], t0 = inner.v;
     const tLo = compile(inner.lo), tHi = compile(inner.hi);
     const set = new Set([u, w, t0]);
     const xyz = set.has('x') && set.has('y') && set.has('z');
     const idx = v => (xyz ? { x: 0, y: 1, z: 2 }[v] : { [u]: 0, [w]: 1, [t0]: 2 }[v]);
-    names = []; names[idx(u)] = u; names[idx(w)] = w; names[idx(t0)] = t0;
-    place = (uu, ww, t) => { const p = []; p[idx(u)] = uu; p[idx(w)] = ww; p[idx(t0)] = t; return p; };
-    bottom = (uu, ww) => { env[u] = uu; env[w] = ww; return tLo(env); };
-    top = (uu, ww) => { env[u] = uu; env[w] = ww; return tHi(env); };
+    const place = env => {
+      if (!cart) return sys.toXYZ(env);
+      const p = []; p[idx(u)] = env[u]; p[idx(w)] = env[w]; p[idx(t0)] = env[t0]; return p;
+    };
+    if (cart) { names = []; names[idx(u)] = u; names[idx(w)] = w; names[idx(t0)] = t0; }
+    const full = (s, r, t) => { const e = envAt(s, r); const lo = tLo(e), hi = tHi(e); e[t0] = lo + (hi - lo) * t; return place(e); };
+    surfaces = [
+      surf((s, r) => full(s, r, 1), TOP), surf((s, r) => full(s, r, 0), BOTTOM),
+      ...[0, 1].map(edge => surf((s, t) => full(s, edge, t), WALL)),
+      ...[0, 1].map(edge => surf((s, t) => full(edge, s, t), WALL)),
+    ];
     $('graph3d-title').textContent = 'The solid region';
-    legend = `<span><i style="background:rgb(${TOP})"></i>top ${M(`${symTex(t0)} = ${toTex(inner.hi)}`)}</span>` +
-      `<span><i style="background:rgb(${BOTTOM})"></i>bottom ${M(`${symTex(t0)} = ${toTex(inner.lo)}`)}</span>` +
-      `<span><i style="background:rgb(${WALL})"></i>sides</span>`;
+    legend = `<span><i style="background:rgb(${TOP})"></i>${M(`${symTex(t0)} = ${toTex(inner.hi)}`)} (outer surface)</span><span><i style="background:rgb(${BOTTOM})"></i>${M(`${symTex(t0)} = ${toTex(inner.lo)}`)}</span><span><i style="background:rgb(${WALL})"></i>sides</span>`;
   }
-  const pt = (s, r, k) => { const uu = U(s), ww = W(uu, r); return { uu, ww, lo: bottom(uu, ww), hi: top(uu, ww), k }; };
-  const surf = (fnc, color) => ({ map: fnc, color });
-  const surfaces = [
-    surf((s, r) => { const p = pt(s, r); return place(p.uu, p.ww, p.hi); }, TOP),
-    surf((s, r) => { const p = pt(s, r); return place(p.uu, p.ww, p.lo); }, BOTTOM),
-    // walls: w at its lower / upper bound, and u at a / b
-    ...[0, 1].map(edge => surf((s, r) => { const p = pt(s, edge); return place(p.uu, p.ww, p.lo + (p.hi - p.lo) * r); }, WALL)),
-    ...[0, 1].map(edge => surf((s, r) => { const p = pt(edge, s); return place(p.uu, p.ww, p.lo + (p.hi - p.lo) * r); }, WALL)),
-  ];
   $('graph3d-card').hidden = false;
   $('legend3d').innerHTML = legend;
-  graph3d.set({ surfaces, names });
+  const points = mark ? [{ at: n === 3 ? mark : [mark[0], mark[1], 0], label: 'center of mass' }] : [];
+  graph3d.set({ surfaces, names, equal: !cart, points });
+}
+
+function reverseNow() {
+  const s = state.multi;
+  if (!s || s.layers.length !== 2 || s.sys.subs) return;
+  const r = reverseOrder(s.layers);
+  let html;
+  if (r.error) html = `<p class="note">${esc(r.error)}</p>`;
+  else {
+    const fNode = $('m-app').value === 'measure' ? num(1) : readExpr('f', 'the integrand');
+    const vals = r.bands.map(B => iterated(fNode, B.layers));
+    const total = vals.reduce((t, x) => t + x.value, 0);
+    const integrals = r.bands.map(B => `${intsTex(B.layers)} ${wrap(fNode)}\\,${dsTex(B.layers)}`).join(' + ');
+    html = `<p>Read the region with ${r.bands.length > 1 ? 'horizontal strips. The left and right boundaries change partway, so it takes ' + r.bands.length + ' integrals' : 'strips the other way'}:</p>
+      <div class="math-line">${M(integrals, true)}</div>
+      <p>Value: ${M(valueTex(total))}, the same as before. ✓</p>
+      ${r.bands.length === 1 ? '<button id="use-reversed">Use these bounds</button>' : ''}`;
+    state.reversed = r;
+    drawRegion(r.bands.map(B => B.layers), 'Region with the order reversed');
+  }
+  $('detail-card').insertAdjacentHTML('beforeend', stage('↻', 'Reverse the order of integration', html));
+  $('detail-card').lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 // ---------- volume ----------
@@ -837,7 +985,7 @@ function setMode(mode) {
   $('f').placeholder = mode === 'area' ? 'first curve f(x), e.g.  x' : mode === 'multi' ? 'e.g.  x y z' : 'e.g.  x e^x    sin^2 x    1/(x^2 + 1)';
   $('examples').innerHTML = '<option value="">Choose an example…</option>' +
     EXAMPLES[mode].map(([name, ex], i) => `<option value="${i}">${esc(name)}: ${esc(ex.f)}${ex.g ? ` and ${esc(ex.g)}` : ''}${ex.a ? ` on [${esc(ex.a)}, ${esc(ex.b)}]` : ''}</option>`).join('');
-  if (mode === 'multi' && !$('layers').children.length) renderLayers();
+  if (mode === 'multi' && !$('layers').children.length) { syncCoords(); renderLayers(); }
   ['answer-card', 'detail-card', 'graph-card', 'graph3d-card'].forEach(id => { $(id).hidden = true; });
   $('error').hidden = true;
   updatePreview();
@@ -850,7 +998,8 @@ function loadExample(i) {
   $('g').value = ex.g || '';
   $('a').value = ex.a || '';
   $('b').value = ex.b || '';
-  if (ex.layers) setLayers(ex.layers);
+  if (ex.layers) setLayers(ex.layers, ex.coords);
+  if (state.mode === 'multi') $('m-app').value = ex.app || 'integral';
   $('wrt').value = ex.wrt || 'x';
   if (state.mode === 'ftc') {
     $('ftc-kind').value = ex.kind;
@@ -896,7 +1045,7 @@ function updatePreview() {
     } else {
       const rows = [...$('layers').querySelectorAll('.layer')].map(row => [...row.querySelectorAll('input')].map(i => i.value.trim()));
       const t = s => { try { return toTex(simplify(parse(s))); } catch { return '?'; } };
-      tex = `${[...rows].reverse().map(r => `\\int_{${t(r[1])}}^{${t(r[2])}}`).join('')} ${wrap(f)}\\,${rows.map(r => `d${r[0] || '?'}`).join('\\,')}`;
+      tex = `${[...rows].reverse().map(r => `\\int_{${t(r[1])}}^{${t(r[2])}}`).join('')} ${wrap(f)}\\,${rows.map(r => `d${r[0] ? symTex(r[0]) : '?'}`).join('\\,')}`;
     }
     pv.className = 'preview';
     pv.innerHTML = M(tex, true);
@@ -917,6 +1066,11 @@ function insertAtCursor(text, close = '') {
   el.setSelectionRange(pos, pos);
   updatePreview();
 }
+
+// a node written back as text the parser understands
+const simpleInput = n => toTex(n).replace(/\\left|\\right/g, '').replace(/\\sqrt\{([^{}]*)\}/g, 'sqrt($1)')
+  .replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '($1)/($2)').replace(/\\ln/g, 'ln').replace(/\\pi/g, 'pi')
+  .replace(/\^\{([^{}]*)\}/g, '^($1)').replace(/[{}]/g, '').replace(/\\,|\\ /g, ' ');
 
 function syncVolumeControls() {
   const rev = $('v-kind').value === 'revolve';
@@ -951,7 +1105,16 @@ function init() {
   });
   document.querySelector('.input-card').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches('input[type="text"]')) compute(); });
   $('method').addEventListener('change', () => compute(false, true));
-  $('dims').addEventListener('change', () => { renderLayers(); updatePreview(); });
+  $('dims').addEventListener('change', () => { syncCoords(); renderLayers(true); updatePreview(); });
+  $('coords').addEventListener('change', () => { syncCoords(); renderLayers(true); updatePreview(); });
+  $('m-app').addEventListener('change', () => compute(true));
+  $('reverse').addEventListener('click', () => { if (!state.multi) compute(); reverseNow(); });
+  $('detail-card').addEventListener('click', e => {
+    if (e.target.id !== 'use-reversed' || !state.reversed) return;
+    const B = state.reversed.bands[0];
+    setLayers(B.layers.map(L => [L.v, simpleInput(L.lo), simpleInput(L.hi)]), 'cartesian2');
+    compute();
+  });
   $('keypad').addEventListener('click', e => { const b = e.target.closest('button'); if (b) insertAtCursor(b.dataset.insert, b.dataset.close || ''); });
   $('toggle-steps').addEventListener('click', () => {
     const s = $('steps');

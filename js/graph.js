@@ -105,6 +105,14 @@ export class Graph {
     const s = this.scene;
     if (!s) return;
     for (const sh of s.shade || []) (sh.horizontal ? this.shadeH(sh) : this.shade(sh));
+    for (const pg of s.polys || []) {
+      const ctx = this.ctx;
+      ctx.beginPath();
+      pg.pts.forEach(([x, y], i) => (i ? ctx.lineTo(this.sx(x), this.sy(y)) : ctx.moveTo(this.sx(x), this.sy(y))));
+      ctx.closePath();
+      ctx.fillStyle = pg.fill || 'rgba(37, 99, 235, 0.22)';
+      ctx.fill('evenodd');
+    }
     for (const rc of s.rects || []) this.rect(rc);
     for (const b of s.boxes || []) {
       const ctx = this.ctx;
