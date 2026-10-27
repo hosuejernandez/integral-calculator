@@ -61,7 +61,8 @@ export function volume(opts) {
     } else if (method === 'washer') {
       const T = fnOf(top, v), Bf = fnOf(bot, v);
       const bv = Bf(m);
-      const through = [0.02, 0.25, 0.5, 0.75, 0.98].some(q => { const x = l.x + (r.x - l.x) * q; return kv > Bf(x) + 1e-9 && kv < T(x) - 1e-9; });
+      let through = false;
+      for (let q = 1; q < 200 && !through; q++) { const x = l.x + (r.x - l.x) * q / 200; through = kv > Bf(x) + 1e-9 && kv < T(x) - 1e-9; }
       if (through) throw new Error('The axis of rotation passes through the region, so the slices are not washers. Choose an axis on the edge of or outside the region.');
       // the axis is below (or at) the region: R = top - k, r = bot - k; above: R = k - bot, r = k - top
       const below = kv <= bv + 1e-12;
