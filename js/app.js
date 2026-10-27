@@ -1,12 +1,14 @@
 // Page wiring for the integral calculator.
-import { parse, toTex, freeSyms, compile, symTex } from './expr.js';
-import { simplify, setMainVar } from './simplify.js';
+import { parse, toTex, freeSyms, compile, symTex, num, mul, pow, sub, substitute } from './expr.js';
+import { simplify, setMainVar, pretty } from './simplify.js';
 import { integrate } from './integrate.js';
-import { definite, riemann, areaBetween, iterated, boundTex, niceTex, fnOf } from './calculus.js';
+import { definite, riemann, areaBetween, iterated, boundTex, niceTex, fnOf, intersections, quad } from './calculus.js';
 import { Graph } from './graph.js';
 import { Graph3D } from './graph3d.js';
+import { volume, solidSurfaces, SHAPES } from './volume.js';
 import { fmt, recognize } from './solve.js';
-import { Stepper, flattenSteps, checkAntiderivative, checkValue, feedbackHTML } from './learn.js';
+import { Stepper, flattenSteps, checkAntiderivative, checkValue, checkExpression, feedbackHTML } from './learn.js';
+import { differentiate } from './diff.js';
 import { makeProblem, TECHNIQUES, loadScore, saveScore } from './quiz.js';
 
 const $ = id => document.getElementById(id);
@@ -41,6 +43,27 @@ const EXAMPLES = {
     ['Line and parabola', { f: 'x', g: 'x^2' }], ['Two parabolas', { f: '4 - x^2', g: 'x^2 - 4' }],
     ['Curves cross 3 times', { f: 'x^3', g: 'x' }], ['sin and cos on [0, 2π]', { f: 'sin x', g: 'cos x', a: '0', b: '2pi' }],
     ['Region with given bounds', { f: 'e^x', g: '0', a: '0', b: '1' }],
+  ],
+  volume: [
+    ['Disk: y = √x about the x-axis', { f: 'sqrt(x)', a: '0', b: '4', kind: 'revolve', axis: 'xaxis' }],
+    ['Washer: y = x and y = x² about the x-axis', { f: 'x', g: 'x^2', kind: 'revolve', axis: 'xaxis' }],
+    ['Washer about the line y = 2', { f: 'x', g: 'x^2', kind: 'revolve', axis: 'y=k', k: '2' }],
+    ['Shells about the y-axis', { f: 'x', g: 'x^2', kind: 'revolve', axis: 'yaxis' }],
+    ['Shells about the line x = −1', { f: 'x', g: 'x^2', kind: 'revolve', axis: 'x=k', k: '-1' }],
+    ['Disk in y: x = √y about the y-axis', { f: 'sqrt(y)', a: '0', b: '4', wrt: 'y', kind: 'revolve', axis: 'yaxis' }],
+    ['Sphere: y = √(4 − x²) about the x-axis', { f: 'sqrt(4 - x^2)', a: '-2', b: '2', kind: 'revolve', axis: 'xaxis' }],
+    ['Squares on y = √x', { f: 'sqrt(x)', a: '0', b: '4', kind: 'cross', shape: 'square' }],
+    ['Semicircles on y = 1 − x²', { f: '1 - x^2', kind: 'cross', shape: 'semicircle' }],
+    ['Equilateral triangles between y = x and y = x²', { f: 'x', g: 'x^2', kind: 'cross', shape: 'equilateral' }],
+  ],
+  ftc: [
+    ['FTC 1: d/dx of ∫ from 0 to x of sin t', { kind: 'ftc1', f: 'sin(t)', a: '0', b: 'x', wrt: 't' }],
+    ['Chain rule: upper bound x²', { kind: 'ftc1', f: 'sin(t)', a: '0', b: 'x^2', wrt: 't' }],
+    ['Variable lower bound', { kind: 'ftc1', f: 'sqrt(1 + t^3)', a: 'x', b: '2', wrt: 't' }],
+    ['Both bounds variable (no antiderivative needed)', { kind: 'ftc1', f: 'e^(t^2)', a: 'x', b: '3x', wrt: 't' }],
+    ['Average value of x² on [0, 3]', { kind: 'avg', f: 'x^2', a: '0', b: '3' }],
+    ['Average value of sin x on [0, π]', { kind: 'avg', f: 'sin x', a: '0', b: 'pi' }],
+    ['Average value of eˣ on [0, 1]', { kind: 'avg', f: 'e^x', a: '0', b: '1' }],
   ],
   multi: [
     ['Triple: box-like region', { f: 'x y z', layers: [['z', '0', '1'], ['y', '0', 'x'], ['x', '0', '2']] }],
@@ -503,16 +526,221 @@ function drawMulti(f, layers) {
   graph3d.set({ surfaces, names });
 }
 
+// ---------- volume ----------
+
+const VCOLORS = { top: [37, 99, 235], bottom: [13, 148, 136], wall: [147, 197, 253], slice: [245, 158, 11] };
+
+function readAxis() {
+  const a = $('v-axis').value;
+  if (a === 'xaxis') return { dir: 'h', k: num(0), tex: '\\text{the } x\\text{-axis}' };
+  if (a === 'yaxis') return { dir: 'v', k: num(0), tex: '\\text{the } y\\text{-axis}' };
+  const k = readBound('v-k', 'value of k', { allowInf: false });
+  return { dir: a === 'y=k' ? 'h' : 'v', k: k.node, tex: `${a === 'y=k' ? 'y' : 'x'} = ${toTex(k.node)}` };
+}
+
+function runVolume() {
+  const v = readVar($('wrt').value.trim() || 'x');
+  if (v !== 'x' && v !== 'y') throw new Error('For volumes, integrate with respect to x (curves y = f(x)) or y (curves x = f(y)).');
+  setMainVar(v);
+  const other = v === 'x' ? 'y' : 'x';
+  const f = readExpr('f', 'the curve');
+  const gSrc = $('g').value.trim();
+  const g = gSrc ? readExpr('g', 'the second curve') : num(0);
+  for (const c of [f, g]) if ([...freeSyms(c)].some(s => s !== v)) throw new Error(`The curves must be written as ${other} = (an expression in ${v}).`);
+  const aSrc = $('a').value.trim(), bSrc = $('b').value.trim();
+  if (!!aSrc !== !!bSrc) throw new Error('Fill in both bounds, or leave both blank to use where the curves cross.');
+  const bounds = aSrc ? [readBound('a', 'lower bound', { allowInf: false }), readBound('b', 'upper bound', { allowInf: false })] : null;
+  if (bounds && !(bounds[0].value < bounds[1].value)) throw new Error('The lower bound must be less than the upper bound.');
+  const kind = $('v-kind').value;
+  const axis = kind === 'revolve' ? readAxis() : null;
+  const shape = $('v-shape').value;
+  const height = shape === 'rectangle' ? readBound('v-h', 'height h', { allowInf: false }).node : null;
+  const opts = { f, g, v, bounds, kind, axis, method: $('v-method').value, shape, height };
+  const vol = volume(opts);
+  const vt = symTex(v), ot = symTex(other);
+  const valTex = vol.exact ? exactTex(vol.exact, vol.total) : valueTex(vol.total);
+  state.check = { kind: 'value', value: vol.total };
+  setAnswer('Volume', M(`V = ${valTex}`, true));
+  showSteps(vol.pieces[0].res.anti ? vol.pieces[0].res.anti.steps : null);
+
+  const p0 = vol.pieces[0];
+  const curveTex = `${ot} = ${toTex(f)}${gSrc ? `\\text{ and } ${ot} = ${toTex(g)}` : `\\text{ and } ${ot} = 0`}`;
+  const range = `${p0.lTex} \\le ${vt} \\le ${vol.pieces[vol.pieces.length - 1].rTex}`;
+  let slice;
+  if (kind === 'cross') {
+    const sh = SHAPES[shape];
+    slice = `<p>Each slice perpendicular to the ${M(vt)}-axis is a <b>${esc(sh.name.toLowerCase())}</b>. Its side (or diameter) ${M('s')} runs across the region from the bottom curve to the top curve:</p>` +
+      vol.pieces.map(p => `<div class="math-line">${M(`s(${vt}) = ${toTex(p.parts.s)}, \\quad A(${vt}) = ${sh.tex.replace('h\\,', height ? `${toTex(height)}\\,` : 'h\\,')} = ${toTex(p.parts.A)}`, true)}</div>`).join('') +
+      `<div class="math-line">${M(`V = \\int_a^b A(${vt})\\,d${vt}`, true)}</div>`;
+  } else if (vol.method === 'washer') {
+    slice = `<p>Slices perpendicular to the axis of rotation are <b>${p0.parts.disk ? 'disks' : 'washers'}</b>. Measure each radius from the axis ${M(axis.tex)}:</p>` +
+      vol.pieces.map(p => `<div class="math-line">${M(p.parts.disk ? `R(${vt}) = ${toTex(p.parts.R)}` : `R(${vt}) = ${toTex(p.parts.R)} \\;(\\text{outer}), \\quad r(${vt}) = ${toTex(p.parts.r)} \\;(\\text{inner})`, true)}</div>`).join('') +
+      `<div class="math-line">${M(p0.parts.disk ? `V = \\pi\\int_a^b R(${vt})^2\\,d${vt}` : `V = \\pi\\int_a^b \\left(R(${vt})^2 - r(${vt})^2\\right)d${vt}`, true)}</div>`;
+  } else {
+    slice = `<p>Thin strips parallel to the axis of rotation sweep out <b>cylindrical shells</b>. The radius is the distance from the strip to the axis ${M(axis.tex)}; the height is top minus bottom:</p>` +
+      vol.pieces.map(p => `<div class="math-line">${M(`\\text{radius} = ${toTex(p.parts.radius)}, \\quad \\text{height} = ${toTex(p.parts.height)}`, true)}</div>`).join('') +
+      `<div class="math-line">${M(`V = 2\\pi\\int_a^b (\\text{radius})(\\text{height})\\,d${vt}`, true)}</div>`;
+  }
+  const integ = vol.pieces.map(p => `<div class="math-line">${M(`\\int_{${p.lTex}}^{${p.rTex}} ${wrap(p.integrand)}\\,d${vt} = ${p.res.exact ? exactTex(p.res.exact, p.res.value) : valueTex(p.res.value)}`, true)}</div>`).join('');
+  $('detail-card').innerHTML = `<h2>Setting up the volume</h2>` +
+    stage(1, 'The region', `<p>The region between ${M(curveTex)} for ${M(range)}${bounds ? '' : ' (where the curves cross)'}.</p>`) +
+    stage(2, 'Slice it', slice) +
+    stage(3, 'Integrate', integ + (vol.pieces.length > 1 ? `<div class="math-line">${M(`V = ${valTex}`, true)}</div>` : ''));
+  $('detail-card').hidden = false;
+
+  // 2D region with the axis and one representative strip
+  const fN = fnOf(f, v), gN = fnOf(g, v);
+  const top = t => Math.max(fN(t), gN(t)), bot = t => Math.min(fN(t), gN(t));
+  const lo = vol.lo, hi = vol.hi, m = (lo + hi) / 2, w = (hi - lo) / 40;
+  const qs = [];
+  for (let i = 0; i <= 100; i++) { const t = lo + (hi - lo) * i / 100; qs.push(top(t), bot(t)); }
+  if (axis) qs.push(vol.kv);
+  const qlo = Math.min(...qs), qhi = Math.max(...qs);
+  let tlo = lo, thi = hi;
+  if (axis && !vol.axisParallel) { tlo = Math.min(lo, vol.kv); thi = Math.max(hi, vol.kv); }
+  const padT = (thi - tlo) * 0.2 || 1, padQ = (qhi - qlo) * 0.2 || 1;
+  const P = (t, q) => (v === 'x' ? [t, q] : [q, t]);
+  const view = v === 'x'
+    ? { x0: tlo - padT, x1: thi + padT, y0: qlo - padQ, y1: qhi + padQ }
+    : { x0: qlo - padQ, x1: qhi + padQ, y0: tlo - padT, y1: thi + padT };
+  const curves = [
+    { px: t => P(t, fN(t)), t0: view[v === 'x' ? 'x0' : 'y0'], t1: view[v === 'x' ? 'x1' : 'y1'], color: COLORS.f },
+    { px: t => P(t, gN(t)), t0: view[v === 'x' ? 'x0' : 'y0'], t1: view[v === 'x' ? 'x1' : 'y1'], color: COLORS.g },
+  ];
+  if (axis) {
+    const k = vol.kv;
+    curves.push(axis.dir === 'h' ? { px: t => [view.x0 + (view.x1 - view.x0) * t, k], color: '#f59e0b', width: 2.5, dash: [8, 5] }
+      : { px: t => [k, view.y0 + (view.y1 - view.y0) * t], color: '#f59e0b', width: 2.5, dash: [8, 5] });
+  }
+  const strip = v === 'x' ? { x0: m - w, x1: m + w, y0: bot(m), y1: top(m) } : { x0: bot(m), x1: top(m), y0: m - w, y1: m + w };
+  $('graph-title').textContent = 'The region';
+  showGraph({
+    curves, view, xName: 'x',
+    shade: [v === 'x' ? { top, bottom: bot, a: lo, b: hi, signed: false } : { horizontal: true, left: bot, right: top, c: lo, d: hi }],
+    boxes: [strip],
+    hint: kind === 'cross' ? 'The orange strip is one slice; the cross-section stands on it.' : `The orange strip is one slice; spinning it around the dashed axis makes ${vol.method === 'shell' ? 'a shell' : 'a disk or washer'}.`,
+  }, `<span><i style="background:${COLORS.f}"></i>${M(`${ot} = ${toTex(f)}`)}</span><span><i style="background:${COLORS.g}"></i>${M(`${ot} = ${toTex(g)}`)}</span>` +
+    (axis ? `<span><i style="background:#f59e0b"></i>axis ${M(axis.tex)}</span>` : '') + `<span><i style="background:rgba(245,158,11,.6)"></i>one slice</span>`);
+  $('graph-title').textContent = 'The region';
+
+  const sol = solidSurfaces(vol, opts, VCOLORS);
+  $('graph3d-card').hidden = false;
+  $('graph3d-title').textContent = kind === 'cross' ? 'The solid built on the region' : 'The solid of revolution';
+  $('legend3d').innerHTML = `<span><i style="background:rgb(${VCOLORS.top})"></i>${kind === 'cross' ? 'cross-section surfaces' : 'outer surface'}</span>` +
+    `<span><i style="background:rgb(${VCOLORS.bottom})"></i>${kind === 'cross' ? 'base region' : 'inner surface'}</span>` +
+    `<span><i style="background:rgb(${VCOLORS.slice})"></i>one ${kind === 'cross' ? 'cross-section' : vol.method === 'shell' ? 'shell' : p0.parts.disk ? 'disk' : 'washer'}</span>`;
+  graph3d.set(sol);
+}
+
+// ---------- FTC part 1 and average value ----------
+
+function runFtc() {
+  if ($('ftc-kind').value === 'avg') return runAverage();
+  const t = readVar($('wrt').value.trim() || 't');
+  const f = readExpr('f', 'the integrand f(t)');
+  if ([...freeSyms(f)].some(s => s !== t)) throw new Error(`The integrand should only use ${t}, the variable of integration.`);
+  if (!$('a').value.trim() || !$('b').value.trim()) throw new Error('Fill in both bounds. At least one should contain x, like 0 and x².');
+  const lower = simplify(parse($('a').value)), upper = simplify(parse($('b').value));
+  const letters = [...new Set([...freeSyms(lower), ...freeSyms(upper)])];
+  if (letters.includes(t)) throw new Error(`The bounds can't use ${t}; that letter is the variable of integration.`);
+  if (letters.length > 1) throw new Error('The bounds should use only one variable, like x.');
+  const X = letters[0] || 'x';
+  setMainVar(X);
+  const xt = symTex(X), tt = symTex(t);
+  const dh = differentiate(upper, X).result, dg = differentiate(lower, X).result;
+  const fh = pretty(substitute(f, { [t]: upper })), fg = pretty(substitute(f, { [t]: lower }));
+  const result = pretty(sub(mul([fh, dh]), mul([fg, dg])));
+  const integral = `\\int_{${toTex(lower)}}^{${toTex(upper)}} ${wrap(f)}\\,d${tt}`;
+  state.check = { kind: 'expr', target: result };
+  setAnswer('Derivative of an integral', M(`\\frac{d}{d${xt}} ${integral} = ${toTex(result)}`, true));
+  const anti = integrate(f, t);
+  showSteps(null);
+
+  const lowerConst = !freeSyms(lower).size, upperConst = !freeSyms(upper).size;
+  const piece = (b, fb, db, sign) => `${sign}f\\left(${toTex(b)}\\right)\\cdot\\frac{d}{d${xt}}\\left[${toTex(b)}\\right] = ${sign}\\left(${toTex(fb)}\\right)\\left(${toTex(db)}\\right)`;
+  let chain = `<div class="math-line">${M(`\\frac{d}{d${xt}} \\int_{g(${xt})}^{h(${xt})} f(${tt})\\,d${tt} = f\\big(h(${xt})\\big)\\,h'(${xt}) - f\\big(g(${xt})\\big)\\,g'(${xt})`, true)}</div>`;
+  chain += upperConst ? `<p>The upper bound is a constant, so its term is 0.</p>` : `<p>Upper bound ${M(`h(${xt}) = ${toTex(upper)}`)}:</p><div class="math-line">${M(piece(upper, fh, dh, ''), true)}</div>`;
+  chain += lowerConst ? `<p>The lower bound is a constant, so its term is 0.</p>` : `<p>Lower bound ${M(`g(${xt}) = ${toTex(lower)}`)} (subtracted):</p><div class="math-line">${M(piece(lower, fg, dg, '-'), true)}</div>`;
+  chain += `<div class="math-line">${M(`\\frac{d}{d${xt}} ${integral} = ${toTex(result)}`, true)}</div>`;
+  let check = '';
+  if (anti) {
+    const A = pretty(sub(substitute(anti.result, { [t]: upper }), substitute(anti.result, { [t]: lower })));
+    check = stage(3, 'Check with an antiderivative', `<p>Here ${M(`F(${tt}) = ${toTex(anti.result)}`)}, so the integral is</p>
+      <div class="math-line">${M(`A(${xt}) = F\\big(${toTex(upper)}\\big) - F\\big(${toTex(lower)}\\big) = ${toTex(A)}`, true)}</div>
+      <p>Differentiating that directly gives ${M(`A'(${xt}) = ${toTex(differentiate(A, X).result)}`)}, the same answer.</p>`);
+  } else {
+    check = stage(3, 'No antiderivative needed', `<p>${M(`f(${tt}) = ${toTex(f)}`)} has no elementary antiderivative, yet the derivative of the integral is easy. That is the power of FTC part 1.</p>`);
+  }
+  $('detail-card').innerHTML = `<h2>Fundamental Theorem of Calculus, part 1</h2>` +
+    stage(1, 'The theorem', `<p>If ${M(`A(${xt}) = \\int_a^{${xt}} f(${tt})\\,d${tt}`)} and ${M('f')} is continuous, then ${M(`A'(${xt}) = f(${xt})`)}: differentiating the accumulated area gives back the function.</p>`) +
+    stage(2, 'Use the chain rule on the bounds', chain) + check;
+  $('detail-card').hidden = false;
+
+  // graph f(t), shading the accumulated area at the slider's x
+  $('ftc-x-name').textContent = X;
+  const x0 = +$('ftc-x').value;
+  const lo = compile(lower)({ [X]: x0 }), hi = compile(upper)({ [X]: x0 });
+  const fN = fnOf(f, t);
+  const area = quad(fN, Math.min(lo, hi), Math.max(lo, hi)) * (hi >= lo ? 1 : -1);
+  const dA = compile(result)({ [X]: x0 });
+  $('graph-title').textContent = 'Accumulated area';
+  showGraph({
+    curves: [{ f: fN, color: COLORS.f, label: 'f' }], xName: t, window: [Math.min(lo, hi, 0), Math.max(lo, hi, 1)],
+    shade: [{ top: fN, a: Math.min(lo, hi), b: Math.max(lo, hi), signed: true }],
+    hint: `At ${X} = ${fmt(x0)} the integral runs from ${tt === 't' ? 't' : t} = ${fmt(lo)} to ${fmt(hi)}. Slide ${X} to watch the area change.`,
+  }, `<span><i style="background:${COLORS.f}"></i>${M(`f(${tt}) = ${toTex(f)}`)}</span>` +
+    `<span>${M(`A(${fmt(x0)}) \\approx ${fmt(area)}`)} &nbsp; ${M(`A'(${fmt(x0)}) \\approx ${fmt(dA)}`)}</span>`);
+}
+
+function runAverage() {
+  const v = readVar($('wrt').value.trim() || 'x');
+  setMainVar(v);
+  const f = readExpr('f', 'the function');
+  if ([...freeSyms(f)].some(s => s !== v)) throw new Error(`The function can only use ${v}.`);
+  const A = readBound('a', 'left endpoint a', { allowInf: false }), B = readBound('b', 'right endpoint b', { allowInf: false });
+  if (!(A.value < B.value)) throw new Error('Average value needs a < b.');
+  const vt = symTex(v);
+  const r = definite(f, v, A, B);
+  const width = pretty(sub(B.node, A.node));
+  const avgExact = r.exact ? pretty(mul([pow(width, num(-1)), r.exact])) : null;
+  const avg = r.value / (B.value - A.value);
+  const avgTex = avgExact ? exactTex(avgExact, avg) : valueTex(avg);
+  state.check = { kind: 'value', value: avg };
+  setAnswer('Average value', M(`f_{\\text{avg}} = ${avgTex}`, true));
+  showSteps(r.anti ? r.anti.steps : null);
+  const level = avgExact || num(Math.round(avg * 1e9), 1e9);
+  const cs = intersections(pretty(sub(f, level)), v, A.value, B.value);
+  $('detail-card').innerHTML = `<h2>Average value</h2>` +
+    stage(1, 'The formula', `<div class="math-line">${M(`f_{\\text{avg}} = \\frac{1}{b - a}\\int_a^b f(${vt})\\,d${vt}`, true)}</div>
+      <p>It is the height of the rectangle on ${M(`[${boundShow(A)}, ${boundShow(B)}]`)} that has the same area as the region under the curve.</p>`) +
+    stage(2, 'Integrate', `<div class="math-line">${M(`\\int_{${boundShow(A)}}^{${boundShow(B)}} ${wrap(f)}\\,d${vt} = ${r.exact ? exactTex(r.exact, r.value) : valueTex(r.value)}`, true)}</div>`) +
+    stage(3, 'Divide by the width', `<div class="math-line">${M(`f_{\\text{avg}} = \\frac{1}{${toTex(width)}}\\cdot ${r.exact ? wrap(r.exact) : fmt(r.value)} = ${avgTex}`, true)}</div>`) +
+    stage(4, 'Mean Value Theorem for integrals', cs.length
+      ? `<p>The function reaches its average value at ${cs.map(c => M(`${vt} = ${c.tex}`)).join(', ')}: ${M(`f(c) = f_{\\text{avg}}`)}.</p>`
+      : '<p>No point in the interval was found where the function equals its average.</p>');
+  $('detail-card').hidden = false;
+  const fN = fnOf(f, v);
+  $('graph-title').textContent = 'Graph';
+  showGraph({
+    curves: [{ f: fN, color: COLORS.f, label: 'f' }, { f: () => avg, color: '#f59e0b', label: 'avg', dash: [8, 5], width: 2.5 }],
+    xName: v, window: [A.value, B.value],
+    shade: [{ top: fN, a: A.value, b: B.value, signed: true }],
+    boxes: [{ x0: A.value, x1: B.value, y0: 0, y1: avg, outline: true }],
+    points: cs.map(c => ({ x: c.x, y: avg, label: `c ≈ ${fmt(c.x)}` })),
+    hint: 'The orange rectangle (height = average value) has the same area as the shaded region.',
+  }, `<span><i style="background:${COLORS.f}"></i>${M(`f(${vt}) = ${toTex(f)}`)}</span><span><i style="background:#f59e0b"></i>${M(`y = f_{\\text{avg}}`)}</span>`);
+}
+
 function showGraph(scene, legend) {
   $('graph-card').hidden = false;
-  if (state.mode !== 'multi') { $('graph-title').textContent = 'Graph'; $('graph3d-card').hidden = true; }
+  if (state.mode !== 'multi' && state.mode !== 'volume') { if (state.mode !== 'ftc') $('graph-title').textContent = 'Graph'; $('graph3d-card').hidden = true; }
   $('legend').innerHTML = legend;
   graph.set(scene);
 }
 
 // ---------- mode switching, preview, events ----------
 
-const RUN = { indef: runIndefinite, def: runDefinite, riemann: runRiemann, area: runArea, multi: runMulti };
+const RUN = { indef: runIndefinite, def: runDefinite, riemann: runRiemann, area: runArea, volume: runVolume, ftc: runFtc, multi: runMulti };
 
 const RESULT_CARDS = ['answer-card', 'detail-card', 'graph-card', 'graph3d-card'];
 
@@ -565,14 +793,16 @@ function setupCheck() {
   const c = state.check;
   $('check-box').hidden = !c;
   if (!c) return;
-  $('check-label').textContent = c.kind === 'anti' ? 'Check your own antiderivative (end it with + C)' : 'Check your own answer (a number like 9/2 or 3π, or "diverges")';
-  $('mine').placeholder = c.kind === 'anti' ? 'e.g.  x e^x - e^x + C' : 'e.g.  2pi/3';
+  $('check-label').textContent = c.kind === 'anti' ? 'Check your own antiderivative (end it with + C)'
+    : c.kind === 'expr' ? 'Check your own answer (an expression)' : 'Check your own answer (a number like 9/2 or 3π, or "diverges")';
+  $('mine').placeholder = c.kind === 'anti' ? 'e.g.  x e^x - e^x + C' : c.kind === 'expr' ? 'e.g.  2x sin(x^2)' : 'e.g.  2pi/3';
 }
 
 function runCheck() {
   const c = state.check;
   if (!c) return;
-  const r = c.kind === 'anti' ? checkAntiderivative($('mine').value, c.f, c.v) : checkValue($('mine').value, c);
+  const r = c.kind === 'anti' ? checkAntiderivative($('mine').value, c.f, c.v)
+    : c.kind === 'expr' ? checkExpression($('mine').value, c.target) : checkValue($('mine').value, c);
   $('check-out').innerHTML = feedbackHTML(r);
   if (r.level === 'correct' || r.level === 'needC') revealAnswer();
 }
@@ -590,13 +820,20 @@ function setMode(mode) {
     return;
   }
   for (const b of $('tabs').querySelectorAll('button')) b.setAttribute('aria-selected', String(b.dataset.mode === mode));
-  $('g-row').hidden = mode !== 'area';
-  $('bounds-row').hidden = !['def', 'riemann', 'area'].includes(mode);
+  $('g-row').hidden = !['area', 'volume'].includes(mode);
+  $('g').placeholder = mode === 'volume' ? 'second curve (optional; blank means the axis 0)' : 'second curve g(x), e.g.  x^2';
+  $('bounds-row').hidden = !['def', 'riemann', 'area', 'volume', 'ftc'].includes(mode);
+  $('ftc-row').hidden = mode !== 'ftc';
+  $('ftc-x-wrap').hidden = $('ftc-kind').value !== 'ftc1';
+  if (mode === 'ftc' && $('ftc-kind').value === 'ftc1' && $('wrt').value.trim() === 'x') $('wrt').value = 't';
+  if (mode !== 'ftc' && $('wrt').value.trim() === 't') $('wrt').value = 'x';
+  $('volume-row').hidden = mode !== 'volume';
+  syncVolumeControls();
   $('riemann-row').hidden = mode !== 'riemann';
   $('multi-row').hidden = mode !== 'multi';
   $('wrt-row').hidden = mode === 'multi';
-  $('area-hint').hidden = mode !== 'area';
-  $('f-label').textContent = { indef: 'Integrand', def: 'Integrand', riemann: 'Function', area: 'Curves', multi: 'Integrand' }[mode];
+  $('area-hint').hidden = !['area', 'volume'].includes(mode);
+  $('f-label').textContent = { indef: 'Integrand', def: 'Integrand', riemann: 'Function', area: 'Curves', volume: 'Region between the curves', ftc: 'Integrand', multi: 'Integrand' }[mode];
   $('f').placeholder = mode === 'area' ? 'first curve f(x), e.g.  x' : mode === 'multi' ? 'e.g.  x y z' : 'e.g.  x e^x    sin^2 x    1/(x^2 + 1)';
   $('examples').innerHTML = '<option value="">Choose an example…</option>' +
     EXAMPLES[mode].map(([name, ex], i) => `<option value="${i}">${esc(name)}: ${esc(ex.f)}${ex.g ? ` and ${esc(ex.g)}` : ''}${ex.a ? ` on [${esc(ex.a)}, ${esc(ex.b)}]` : ''}</option>`).join('');
@@ -614,7 +851,19 @@ function loadExample(i) {
   $('a').value = ex.a || '';
   $('b').value = ex.b || '';
   if (ex.layers) setLayers(ex.layers);
-  $('wrt').value = 'x';
+  $('wrt').value = ex.wrt || 'x';
+  if (state.mode === 'ftc') {
+    $('ftc-kind').value = ex.kind;
+    $('ftc-x-wrap').hidden = ex.kind !== 'ftc1';
+  }
+  if (state.mode === 'volume') {
+    $('v-kind').value = ex.kind;
+    if (ex.axis) $('v-axis').value = ex.axis;
+    if (ex.k) $('v-k').value = ex.k;
+    $('v-method').value = ex.method || 'auto';
+    if (ex.shape) $('v-shape').value = ex.shape;
+    syncVolumeControls();
+  }
   updatePreview();
   compute();
 }
@@ -631,7 +880,16 @@ function updatePreview() {
     let tex;
     if (mode === 'indef') tex = `\\int ${wrap(f)}\\,d${vt}`;
     else if (mode === 'def' || mode === 'riemann') tex = `\\int_{${b('a')}}^{${b('b')}} ${wrap(f)}\\,d${vt}`;
-    else if (mode === 'area') {
+    else if (mode === 'ftc') {
+      tex = $('ftc-kind').value === 'avg'
+        ? `f_{\\text{avg}} = \\frac{1}{b - a}\\int_{${b('a')}}^{${b('b')}} ${wrap(f)}\\,d${vt}`
+        : `\\frac{d}{dx}\\int_{${b('a')}}^{${b('b')}} ${wrap(f)}\\,d${vt}`;
+    } else if (mode === 'volume') {
+      let g = '0';
+      try { if ($('g').value.trim()) g = toTex(readExpr('g', 'g')); } catch { g = '?'; }
+      const o = v === 'x' ? 'y' : 'x';
+      tex = `\\text{volume from the region between } ${o} = ${toTex(f)} \\text{ and } ${o} = ${g}`;
+    } else if (mode === 'area') {
       let g = '?';
       try { g = toTex(readExpr('g', 'g')); } catch { /* not typed yet */ }
       tex = `\\text{area between } y = ${toTex(f)} \\text{ and } y = ${g}`;
@@ -660,7 +918,25 @@ function insertAtCursor(text, close = '') {
   updatePreview();
 }
 
+function syncVolumeControls() {
+  const rev = $('v-kind').value === 'revolve';
+  $('v-axis-wrap').hidden = !rev;
+  $('v-method-wrap').hidden = !rev;
+  $('v-shape-wrap').hidden = rev;
+  $('v-k-wrap').hidden = !['y=k', 'x=k'].includes($('v-axis').value);
+  $('v-h-wrap').hidden = $('v-shape').value !== 'rectangle';
+}
+
 function init() {
+  $('v-shape').innerHTML = Object.entries(SHAPES).map(([k, s]) => `<option value="${k}">${esc(s.name)}</option>`).join('');
+  for (const id of ['v-kind', 'v-axis', 'v-method', 'v-shape']) $(id).addEventListener('change', () => { syncVolumeControls(); compute(true); });
+  $('ftc-kind').addEventListener('change', () => {
+    const avg = $('ftc-kind').value === 'avg';
+    $('ftc-x-wrap').hidden = avg;
+    $('wrt').value = avg ? 'x' : 't';
+    updatePreview();
+    compute(true);
+  });
   graph = new Graph($('graph'), $('readout'));
   graph3d = new Graph3D($('graph3d'), $('readout3d'));
   $('reset3d').addEventListener('click', () => graph3d.reset());
@@ -670,6 +946,7 @@ function init() {
   document.addEventListener('focusin', e => { if (e.target.matches('input[type="text"]')) state.lastInput = e.target; });
   document.querySelector('.input-card').addEventListener('input', e => {
     if (e.target.id === 'n') { $('n-out').textContent = e.target.value; compute(false, true); return; }
+    if (e.target.id === 'ftc-x') { $('ftc-x-out').textContent = e.target.value; compute(true, true); return; }
     updatePreview();
   });
   document.querySelector('.input-card').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches('input[type="text"]')) compute(); });

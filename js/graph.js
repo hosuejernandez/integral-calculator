@@ -106,6 +106,16 @@ export class Graph {
     if (!s) return;
     for (const sh of s.shade || []) (sh.horizontal ? this.shadeH(sh) : this.shade(sh));
     for (const rc of s.rects || []) this.rect(rc);
+    for (const b of s.boxes || []) {
+      const ctx = this.ctx;
+      ctx.fillStyle = b.outline ? 'rgba(245, 158, 11, 0.12)' : 'rgba(245, 158, 11, 0.45)';
+      ctx.strokeStyle = '#b45309'; ctx.lineWidth = b.outline ? 2 : 1.5;
+      ctx.setLineDash(b.outline ? [6, 4] : []);
+      const X0 = this.sx(b.x0), X1 = this.sx(b.x1), Y0 = this.sy(b.y0), Y1 = this.sy(b.y1);
+      ctx.fillRect(Math.min(X0, X1), Math.min(Y0, Y1), Math.max(Math.abs(X1 - X0), 3), Math.max(Math.abs(Y1 - Y0), 3));
+      ctx.strokeRect(Math.min(X0, X1), Math.min(Y0, Y1), Math.max(Math.abs(X1 - X0), 3), Math.max(Math.abs(Y1 - Y0), 3));
+      ctx.setLineDash([]);
+    }
     for (const cv of s.curves) {
       if (cv.px) this.paramCurve(cv);
       else this.curve(cv.f, cv.color, cv.dash || [], cv.width || 3);

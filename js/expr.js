@@ -372,7 +372,7 @@ function mulTex(n) {
     if (numer.every(f => f.type === 'sym' || (f.type === 'pow' && f.base.type === 'sym')))
       return `${sign}\\frac{${wrapSum(numer, cn)}}{${cd}}`;
     // pi/3 (r^2 + ...) : letters go on top of the fraction, sums and functions after it
-    const simpleF = f => f.type === 'sym' || (f.type === 'pow' && f.base.type === 'sym');
+    const simpleF = f => f.type === 'sym' || (f.type === 'pow' && (f.base.type === 'sym' || f.base.type === 'num'));
     const top = numer.filter(simpleF), after = numer.filter(f => !simpleF(f));
     const rest = after.length === 1 && after[0].type === 'add'
       ? `\\left(${toTex(after[0])}\\right)` : factorsTex(after);

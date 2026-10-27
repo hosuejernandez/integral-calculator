@@ -17,7 +17,9 @@ export class Graph3D {
 
   // surfaces: [{ map: (s, t) => [x, y, z] for s, t in [0, 1], color: [r, g, b], n? }]
   // names: axis labels ['x', 'y', 'z']
-  set({ surfaces, names }) {
+  // equal: use one scale for all axes (solids of revolution must look round)
+  set({ surfaces, names, equal = false }) {
+    this.equal = equal;
     this.names = names;
     const pts = [];
     const raw = [];
@@ -36,17 +38,20 @@ export class Graph3D {
       for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
         const q = [grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]];
         if (q.some(p => !p)) continue;
-        raw.push({ q, color: S.color });
+        raw.push({ q, color: S.color, front: !!S.front });
       }
     }
     if (!pts.length) { this.quads = []; this.draw(); return; }
     const lo = [0, 1, 2].map(k => Math.min(...pts.map(p => p[k])));
     const hi = [0, 1, 2].map(k => Math.max(...pts.map(p => p[k])));
     // axes are scaled independently so long, thin regions still fill the view
-    const span = hi.map((h, k) => (h - lo[k]) || 1);
+    let span = hi.map((h, k) => (h - lo[k]) || 1);
+    if (equal) { const m = Math.max(...span); span = [m, m, m]; }
     this.box = { lo, hi };
-    const norm = p => p.map((v, k) => (v - lo[k]) / span[k] - 0.5);
-    this.quads = raw.map(({ q, color }) => ({ q: q.map(norm), color }));
+    const mids = lo.map((l, k) => (l + hi[k]) / 2);
+    const norm = p => p.map((v, k) => (v - mids[k]) / span[k]);
+    this.half = hi.map((h, k) => (h - lo[k]) / span[k] / 2 || 0.5);
+    this.quads = raw.map(({ q, color, front }) => ({ q: q.map(norm), color, front }));
     this.yaw = -0.9; this.pitch = 0.45; this.zoom = 1;
     this.draw();
   }
@@ -92,8 +97,8 @@ export class Graph3D {
       const P = Q.q.map(p => this.project(p));
       const n = norm3(cross(sub3(Q.q[1], Q.q[0]), sub3(Q.q[3], Q.q[0])));
       const lit = 0.55 + 0.45 * Math.abs(dot(n, light));
-      return { P, depth: (P[0][2] + P[1][2] + P[2][2] + P[3][2]) / 4, color: Q.color, lit };
-    }).sort((a, b) => b.depth - a.depth);
+      return { P, depth: (P[0][2] + P[1][2] + P[2][2] + P[3][2]) / 4, color: Q.color, lit, front: Q.front };
+    }).sort((a, b) => (a.front - b.front) || (b.depth - a.depth)); // highlighted pieces always on top
     for (const { P, color, lit } of proj) {
       ctx.beginPath();
       ctx.moveTo(P[0][0], P[0][1]);
@@ -106,14 +111,15 @@ export class Graph3D {
       ctx.fill(); ctx.stroke();
     }
     this.drawBox(false);
-    this.say('Drag to rotate, scroll to zoom. Each axis is scaled to fit, so shapes may look stretched.');
+    this.say(this.equal ? 'Drag to rotate, scroll to zoom.' : 'Drag to rotate, scroll to zoom. Each axis is scaled to fit, so shapes may look stretched.');
   }
 
   // bounding box edges (behind = dashed, drawn first) with axis labels
   drawBox(behind) {
     const ctx = this.ctx, { lo, hi } = this.box;
     const corners = [];
-    for (const a of [-0.5, 0.5]) for (const b of [-0.5, 0.5]) for (const c of [-0.5, 0.5]) corners.push([a, b, c]);
+    const [h0, h1, h2] = this.half;
+    for (const a of [-h0, h0]) for (const b of [-h1, h1]) for (const c of [-h2, h2]) corners.push([a, b, c]);
     const edges = [];
     for (let i = 0; i < 8; i++) for (let j = i + 1; j < 8; j++) {
       const d = corners[i].reduce((s, v, k) => s + (v !== corners[j][k]), 0);
@@ -133,9 +139,9 @@ export class Graph3D {
     if (behind) return;
     // axis labels along three edges from the low corner
     ctx.font = '600 12px system-ui, sans-serif';
-    const o = [-0.5, -0.5, -0.5];
+    const o = this.half.map(h => -h);
     this.names.forEach((name, k) => {
-      const end = o.slice(); end[k] = 0.5;
+      const end = o.slice(); end[k] = this.half[k];
       const mid = o.slice(); mid[k] = 0;
       const A = this.project(o), B = this.project(end), Mid = this.project(mid);
       ctx.strokeStyle = AXIS_COLORS[['x', 'y', 'z'][k]]; ctx.lineWidth = 2.5;

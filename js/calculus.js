@@ -168,7 +168,7 @@ export function riemann(f, a, b, n, method) {
 
 // ---------- area between curves ----------
 
-function intersections(h, v, lo, hi) {
+export function intersections(h, v, lo, hi) {
   const r = toRational(h, v);
   if (r) {
     const H = fnOf(h, v);

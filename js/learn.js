@@ -125,6 +125,32 @@ function fracText(k) {
   return `${Math.round(k * 1000) / 1000}`;
 }
 
+// Is `src` the same expression as `target` (a function of the letters in it)?
+export function checkExpression(src, target) {
+  const text = src.trim();
+  if (!text) return { level: 'empty', message: 'Type your answer first.' };
+  let S;
+  try { S = simplify(parse(text)); } catch (e) { return { level: 'error', message: `I couldn't read that: ${e.message}` }; }
+  if (S.type === 'eq') return { level: 'error', message: 'Type just the expression, without "=".' };
+  const letters = new Set(freeSyms(target));
+  const extra = [...freeSyms(S)].filter(l => !letters.has(l));
+  if (extra.length) return { level: 'error', message: `Your answer uses the letter ${extra[0]}, which shouldn't appear in the answer.` };
+  const A = compile(target), B = compile(S);
+  let same = 0, tested = 0, neg = 0;
+  for (const x of SAMPLE) {
+    const env = {};
+    for (const l of letters) env[l] = x + l.charCodeAt(0) % 3 * 0.17;
+    const a = A(env), b = B(env);
+    if (!isFinite(a) || !isFinite(b)) continue;
+    tested++;
+    if (Math.abs(a - b) <= 1e-6 * (1 + Math.abs(a))) same++;
+    if (Math.abs(a + b) <= 1e-6 * (1 + Math.abs(a))) neg++;
+  }
+  if (tested >= 2 && same === tested) return { level: 'correct', message: 'Correct!' };
+  if (tested >= 2 && neg === tested) return { level: 'sign', message: 'Close: your answer has the wrong sign. Remember the lower bound contributes with a minus sign.' };
+  return { level: 'wrong', message: 'Not quite. Did you multiply by the derivative of the bound (chain rule)?' };
+}
+
 // Is `src` the right number? target = { value, diverges }
 export function checkValue(src, target) {
   const text = src.trim();

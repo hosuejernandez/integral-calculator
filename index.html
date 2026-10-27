@@ -6,8 +6,9 @@
   <title>Integral Calculator</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
-  <link rel="stylesheet" href="css/style.css">
-  <script type="module" src="js/app.js"></script>
+  <link rel="stylesheet" href="css/style.css?v=mvqynud8">
+  <script type="importmap">{"imports":{"./js/app.js":"./js/app.js?v=mvqynud8","./js/calculus.js":"./js/calculus.js?v=mvqynud8","./js/diff.js":"./js/diff.js?v=mvqynud8","./js/expr.js":"./js/expr.js?v=mvqynud8","./js/graph.js":"./js/graph.js?v=mvqynud8","./js/graph3d.js":"./js/graph3d.js?v=mvqynud8","./js/integrate.js":"./js/integrate.js?v=mvqynud8","./js/learn.js":"./js/learn.js?v=mvqynud8","./js/quiz.js":"./js/quiz.js?v=mvqynud8","./js/simplify.js":"./js/simplify.js?v=mvqynud8","./js/solve.js":"./js/solve.js?v=mvqynud8","./js/volume.js":"./js/volume.js?v=mvqynud8"}}</script>
+  <script type="module" src="js/app.js?v=mvqynud8"></script>
 </head>
 <body>
   <main>
@@ -22,6 +23,8 @@
         <button role="tab" data-mode="def">Definite</button>
         <button role="tab" data-mode="riemann">Riemann sums</button>
         <button role="tab" data-mode="area">Area between curves</button>
+        <button role="tab" data-mode="volume">Volume</button>
+        <button role="tab" data-mode="ftc">FTC &amp; average</button>
       </div>
       <div class="tab-group"><span class="tab-group-label">Calc 3</span>
         <button role="tab" data-mode="multi">Multiple integrals</button>
@@ -82,6 +85,48 @@
             <option value="midpoint">Midpoints</option>
             <option value="trapezoid">Trapezoids</option>
           </select>
+        </label>
+      </div>
+
+      <div class="options" id="volume-row" hidden>
+        <label>Solid
+          <select id="v-kind">
+            <option value="revolve">Revolve the region around an axis</option>
+            <option value="cross">Known cross-sections</option>
+          </select>
+        </label>
+        <label id="v-axis-wrap">Axis
+          <select id="v-axis">
+            <option value="xaxis">x-axis</option>
+            <option value="yaxis">y-axis</option>
+            <option value="y=k">the line y = k</option>
+            <option value="x=k">the line x = k</option>
+          </select>
+          <span id="v-k-wrap" hidden>k = <input id="v-k" type="text" value="1" autocomplete="off"></span>
+        </label>
+        <label id="v-method-wrap">Method
+          <select id="v-method">
+            <option value="auto">Choose for me</option>
+            <option value="washer">Disk / washer</option>
+            <option value="shell">Shell</option>
+          </select>
+        </label>
+        <label id="v-shape-wrap" hidden>Cross-sections
+          <select id="v-shape"></select>
+          <span id="v-h-wrap" hidden>h = <input id="v-h" type="text" value="1" autocomplete="off"></span>
+        </label>
+      </div>
+
+      <div class="options" id="ftc-row" hidden>
+        <label>Find
+          <select id="ftc-kind">
+            <option value="ftc1">the derivative of an integral (FTC part 1)</option>
+            <option value="avg">the average value of a function</option>
+          </select>
+        </label>
+        <label id="ftc-x-wrap">Graph at <span id="ftc-x-name">x</span> =
+          <input id="ftc-x" type="range" min="-3" max="3" step="0.05" value="1">
+          <output id="ftc-x-out">1</output>
         </label>
       </div>
 

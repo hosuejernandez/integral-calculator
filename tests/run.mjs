@@ -79,5 +79,21 @@ for (const t of ['usub', 'parts', 'pf', 'trig', 'mixed']) for (const L of [1, 2,
 }
 check('quiz problems all solvable', solvable, 120);
 
+// volumes
+const { volume } = await import('../js/volume.js');
+const { num: N } = await import('../js/expr.js');
+const VOL = o => { setMainVar(o.v || 'x'); const r = volume({ v: 'x', g: null, bounds: null, method: 'auto', ...o }); return r.exact ? toTex(r.exact) : r.total; };
+check('disk sqrt x', VOL({ f: P('sqrt(x)'), bounds: [B('0'), B('4')], kind: 'revolve', axis: { dir: 'h', k: N(0) } }), '8 \\pi');
+check('washer', VOL({ f: P('x'), g: P('x^2'), kind: 'revolve', axis: { dir: 'h', k: N(0) } }), '\\frac{2 \\pi}{15}');
+check('shell y-axis', VOL({ f: P('x'), g: P('x^2'), kind: 'revolve', axis: { dir: 'v', k: N(0) } }), '\\frac{\\pi}{6}');
+check('washer about y=2', VOL({ f: P('x'), g: P('x^2'), kind: 'revolve', axis: { dir: 'h', k: P('2') } }), '\\frac{8 \\pi}{15}');
+check('shell about x=-1', VOL({ f: P('x'), g: P('x^2'), kind: 'revolve', axis: { dir: 'v', k: P('-1') } }), '\\frac{\\pi}{2}');
+check('sphere', VOL({ f: P('sqrt(4 - x^2)'), bounds: [B('-2'), B('2')], kind: 'revolve', axis: { dir: 'h', k: N(0) } }), '\\frac{32 \\pi}{3}');
+check('squares', VOL({ f: P('sqrt(x)'), bounds: [B('0'), B('4')], kind: 'cross', shape: 'square' }), '8');
+check('disk in y', VOL({ v: 'y', f: P('sqrt(y)'), bounds: [B('0'), B('4')], kind: 'revolve', axis: { dir: 'v', k: N(0) } }), '8 \\pi');
+let threw = false;
+try { VOL({ f: P('x'), g: P('x^2'), kind: 'revolve', axis: { dir: 'h', k: P('1/2') } }); } catch { threw = true; }
+check('axis through region rejected', threw, true);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
