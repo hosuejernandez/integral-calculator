@@ -58,5 +58,26 @@ check('triple xyz', toTex(iterated(P('x y z'), L([['z', '0', '1'], ['y', '0', 'x
 check('tetrahedron', toTex(iterated(P('1'), L([['z', '0', '1 - x - y'], ['y', '0', '1 - x'], ['x', '0', '1']])).exact), '\\frac{1}{6}');
 check("quarter disk numeric", Math.abs(iterated(P('x^2 + y^2'), L([['y', '0', 'sqrt(1 - x^2)'], ['x', '0', '1']])).value - Math.PI / 8) < 1e-5, true);
 
+// study tools
+const { checkAntiderivative, checkValue } = await import('../js/learn.js');
+const { makeProblem } = await import('../js/quiz.js');
+setMainVar('x');
+const xe = P('x e^x');
+check('check correct', checkAntiderivative('x e^x - e^x + C', xe, 'x').level, 'correct');
+check('check +5', checkAntiderivative('x e^x - e^x + 5 + C', xe, 'x').level, 'correct');
+check('check missing C', checkAntiderivative('x e^x - e^x', xe, 'x').level, 'needC');
+check('check factor', checkAntiderivative('2(x e^x - e^x) + C', xe, 'x').level, 'factor');
+check('check sign', checkAntiderivative('e^x - x e^x + C', xe, 'x').level, 'sign');
+check('check wrong', checkAntiderivative('x^2 e^x + C', xe, 'x').level, 'wrong');
+check('value exact', checkValue('9', { value: 9 }).level, 'correct');
+check('value pi', checkValue('3.1416', { value: Math.PI }).level, 'correct');
+check('value wrong', checkValue('3', { value: Math.PI }).level, 'wrong');
+check('value diverges', checkValue('diverges', { value: NaN, diverges: true }).level, 'correct');
+let solvable = 0;
+for (const t of ['usub', 'parts', 'pf', 'trig', 'mixed']) for (const L of [1, 2, 3]) for (let i = 0; i < 8; i++) {
+  try { if (makeProblem(t, L).solution) solvable++; } catch { /* counted as missing */ }
+}
+check('quiz problems all solvable', solvable, 120);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

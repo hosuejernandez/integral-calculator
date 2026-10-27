@@ -6,6 +6,8 @@ import { definite, riemann, areaBetween, iterated, boundTex, niceTex, fnOf } fro
 import { Graph } from './graph.js';
 import { Graph3D } from './graph3d.js';
 import { fmt, recognize } from './solve.js';
+import { Stepper, flattenSteps, checkAntiderivative, checkValue, feedbackHTML } from './learn.js';
+import { makeProblem, TECHNIQUES, loadScore, saveScore } from './quiz.js';
 
 const $ = id => document.getElementById(id);
 // "= \approx 2.65" reads badly, so a value that is only approximate takes the place of the "="
@@ -49,7 +51,7 @@ const EXAMPLES = {
   ],
 };
 
-const state = { mode: 'indef', lastInput: null, steps: null };
+const state = { mode: 'indef', lastInput: null, stepRoot: null, stepMode: 'all', check: null, revealed: false };
 let graph, graph3d;
 
 // ---------- reading inputs ----------
@@ -97,10 +99,20 @@ function stepTree(step, depth = 0) {
 }
 const wrap = n => (n.type === 'add' ? `\\left(${toTex(n)}\\right)` : toTex(n));
 
-function showSteps(html) {
-  state.steps = html;
-  $('toggle-steps').hidden = !html;
-  $('steps').innerHTML = html || '';
+function showSteps(root) {
+  state.stepRoot = root;
+  $('toggle-steps').hidden = !root;
+  $('steps-mode').hidden = !root || $('steps').hidden;
+  renderSteps();
+}
+
+function renderSteps() {
+  const el = $('steps');
+  el.onclick = null;
+  if (!state.stepRoot) { el.innerHTML = ''; return; }
+  for (const b of $('steps-mode').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.smode === state.stepMode));
+  if (state.stepMode === 'one') new Stepper(el, flattenSteps(state.stepRoot));
+  else el.innerHTML = stepTree(state.stepRoot);
 }
 
 const approx = v => {
@@ -138,6 +150,7 @@ function runIndefinite() {
   const f = readExpr('f', 'the integrand');
   const vt = symTex(v);
   const r = integrate(f, v);
+  state.check = r ? { kind: 'anti', f, v } : null;
   $('detail-card').hidden = true;
   if (!r) {
     setAnswer('Indefinite integral', `<p>${esc(NO_ANTI)}</p><p class="answer-note">Switch to <b>Definite</b> to get a numeric value over an interval.</p>`);
@@ -145,7 +158,7 @@ function runIndefinite() {
   } else {
     setAnswer('Indefinite integral', M(`\\int ${wrap(f)}\\,d${vt} = ${toTex(r.result)} + C`, true) +
       `<p class="answer-note">✓ Checked: the derivative of the answer equals the integrand.</p>`);
-    showSteps(stepTree(r.steps));
+    showSteps(r.steps);
   }
   // graph f and one antiderivative
   if (freeSyms(f).size > 1 || (freeSyms(f).size === 1 && !freeSyms(f).has(v))) { $('graph-card').hidden = true; return; }
@@ -166,8 +179,9 @@ function runDefinite() {
   const A = readBound('a', 'lower bound'), B = readBound('b', 'upper bound');
   const vt = symTex(v);
   const r = definite(f, v, A, B);
+  state.check = { kind: 'value', value: r.value, diverges: !!r.diverges };
   const integral = `\\int_{${boundShow(A)}}^{${boundShow(B)}} ${wrap(f)}\\,d${vt}`;
-  showSteps(r.anti ? stepTree(r.anti.steps) : null);
+  showSteps(r.anti ? r.anti.steps : null);
 
   let answer, body = '';
   if (r.diverges) answer = M(`${integral} \\text{ diverges}`, true);
@@ -236,11 +250,12 @@ function runRiemann() {
   const n = +$('n').value, method = $('method').value, m = METHOD[method];
   const vt = symTex(v), fN = fnOf(f, v);
   const rs = riemann(fN, A.value, B.value, n, method);
+  state.check = { kind: 'value', value: rs.sum };
   const exact = definite(f, v, A, B);
   const Sn = `${m.sym}_{${n}}`;
   setAnswer(`${m.name} Riemann sum`, M(`${Sn} = ${valueTex(rs.sum)}`, true) +
     (isFinite(exact.value) ? `<p class="answer-note">Exact integral: ${M(exact.exact ? exactTex(exact.exact, exact.value) : valueTex(exact.value))}, error ${M(`${Sn} - \\int = ${fmt(rs.sum - exact.value)}`)}</p>` : ''));
-  showSteps(exact.anti ? stepTree(exact.anti.steps) : null);
+  showSteps(exact.anti ? exact.anti.steps : null);
 
   const dxTex = `\\Delta ${vt} = \\frac{b - a}{n} = \\frac{${boundShow(B)} - ${boundShow(A)}}{${n}} = ${valueTex(rs.dx)}`;
   let formula;
@@ -282,8 +297,9 @@ function runArea() {
   const r = areaBetween(f, g, v, bounds);
   const vt = symTex(v);
   if (r.error) throw new Error(r.error);
+  state.check = { kind: 'value', value: r.total };
   setAnswer('Area between curves', M(`\\text{Area} = ${r.exactTotal ? exactTex(r.exactTotal, r.total) : valueTex(r.total)}`, true));
-  showSteps(r.H ? stepTree(r.H.steps) : null);
+  showSteps(r.H ? r.H.steps : null);
 
   const F = `f(${vt}) = ${toTex(f)}`, G = `g(${vt}) = ${toTex(g)}`;
   const meet = r.pts.length
@@ -361,6 +377,7 @@ function runMulti() {
   if (extra.length) throw new Error(`The integrand uses ${extra[0]}, which is not one of the integration variables.`);
   setMainVar(layers[layers.length - 1].v);
   const r = iterated(f, layers);
+  state.check = { kind: 'value', value: r.value };
   const ints = [...layers].reverse().map(L => `\\int_{${toTex(L.lo)}}^{${toTex(L.hi)}}`).join('');
   const ds = layers.map(L => `d${symTex(L.v)}`).join('\\,');
   const full = `${ints} ${wrap(f)}\\,${ds}`;
@@ -497,10 +514,20 @@ function showGraph(scene, legend) {
 
 const RUN = { indef: runIndefinite, def: runDefinite, riemann: runRiemann, area: runArea, multi: runMulti };
 
-// quiet = true when switching tabs: half-filled inputs just leave the results empty
-function compute(quiet = false) {
+const RESULT_CARDS = ['answer-card', 'detail-card', 'graph-card', 'graph3d-card'];
+
+// quiet = true when switching tabs: half-filled inputs just leave the results empty.
+// keep = true for small changes (the Riemann n slider) that should not re-hide the answer.
+function compute(quiet = false, keep = false) {
   $('error').hidden = true;
-  try { RUN[state.mode](); } catch (e) {
+  if (!keep) state.revealed = false;
+  state.check = null;
+  $('check-out').innerHTML = '';
+  try {
+    RUN[state.mode]();
+    setupCheck();
+    gateAnswer();
+  } catch (e) {
     if (quiet) { ['answer-card', 'detail-card', 'graph-card', 'graph3d-card'].forEach(id => { $(id).hidden = true; }); return; }
     console.error(e);
     $('error').textContent = e.message || String(e);
@@ -509,8 +536,59 @@ function compute(quiet = false) {
   }
 }
 
+// "Hide the answer until I try it myself": keep the result covered until the student checks
+// an answer or asks to see it.
+function gateAnswer() {
+  if (!$('hide-answer').checked || state.revealed || !state.check) return;
+  state.hiddenAnswer = $('answer').innerHTML;
+  state.hiddenCards = RESULT_CARDS.filter(id => id !== 'answer-card' && !$(id).hidden);
+  state.hiddenCards.forEach(id => { $(id).hidden = true; });
+  $('answer').innerHTML = `<p class="hidden-answer">The answer is hidden. Work it out, then check it below, or <button id="reveal-answer">Show answer</button></p>`;
+  $('toggle-steps').hidden = true;
+  $('steps').hidden = true;
+  $('steps-mode').hidden = true;
+}
+
+function revealAnswer() {
+  if (state.revealed) return;
+  state.revealed = true;
+  if (state.hiddenAnswer === undefined) return;
+  $('answer').innerHTML = state.hiddenAnswer;
+  state.hiddenCards.forEach(id => { $(id).hidden = false; });
+  if (!$('graph-card').hidden) graph.draw();
+  if (!$('graph3d-card').hidden) graph3d.draw();
+  $('toggle-steps').hidden = !state.stepRoot;
+  state.hiddenAnswer = undefined;
+}
+
+function setupCheck() {
+  const c = state.check;
+  $('check-box').hidden = !c;
+  if (!c) return;
+  $('check-label').textContent = c.kind === 'anti' ? 'Check your own antiderivative (end it with + C)' : 'Check your own answer (a number like 9/2 or 3π, or "diverges")';
+  $('mine').placeholder = c.kind === 'anti' ? 'e.g.  x e^x - e^x + C' : 'e.g.  2pi/3';
+}
+
+function runCheck() {
+  const c = state.check;
+  if (!c) return;
+  const r = c.kind === 'anti' ? checkAntiderivative($('mine').value, c.f, c.v) : checkValue($('mine').value, c);
+  $('check-out').innerHTML = feedbackHTML(r);
+  if (r.level === 'correct' || r.level === 'needC') revealAnswer();
+}
+
 function setMode(mode) {
   state.mode = mode;
+  const quiz = mode === 'quiz';
+  document.querySelector('.input-card').hidden = quiz;
+  $('quiz-card').hidden = !quiz;
+  if (quiz) {
+    for (const b of $('tabs').querySelectorAll('button')) b.setAttribute('aria-selected', String(b.dataset.mode === mode));
+    RESULT_CARDS.forEach(id => { $(id).hidden = true; });
+    $('error').hidden = true;
+    if (!state.quiz) newProblem();
+    return;
+  }
   for (const b of $('tabs').querySelectorAll('button')) b.setAttribute('aria-selected', String(b.dataset.mode === mode));
   $('g-row').hidden = mode !== 'area';
   $('bounds-row').hidden = !['def', 'riemann', 'area'].includes(mode);
@@ -588,27 +666,129 @@ function init() {
   $('reset3d').addEventListener('click', () => graph3d.reset());
   $('tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setMode(b.dataset.mode); });
   $('examples').addEventListener('change', e => { if (e.target.value !== '') loadExample(+e.target.value); });
-  $('go').addEventListener('click', compute);
+  $('go').addEventListener('click', () => compute());
   document.addEventListener('focusin', e => { if (e.target.matches('input[type="text"]')) state.lastInput = e.target; });
   document.querySelector('.input-card').addEventListener('input', e => {
-    if (e.target.id === 'n') { $('n-out').textContent = e.target.value; compute(); return; }
+    if (e.target.id === 'n') { $('n-out').textContent = e.target.value; compute(false, true); return; }
     updatePreview();
   });
   document.querySelector('.input-card').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches('input[type="text"]')) compute(); });
-  $('method').addEventListener('change', compute);
+  $('method').addEventListener('change', () => compute(false, true));
   $('dims').addEventListener('change', () => { renderLayers(); updatePreview(); });
   $('keypad').addEventListener('click', e => { const b = e.target.closest('button'); if (b) insertAtCursor(b.dataset.insert, b.dataset.close || ''); });
   $('toggle-steps').addEventListener('click', () => {
     const s = $('steps');
     s.hidden = !s.hidden;
+    $('steps-mode').hidden = s.hidden;
     $('toggle-steps').textContent = s.hidden ? 'Show steps' : 'Hide steps';
   });
+  $('steps-mode').addEventListener('click', e => {
+    const b = e.target.closest('[data-smode]');
+    if (!b) return;
+    state.stepMode = b.dataset.smode;
+    renderSteps();
+  });
+  $('check-btn').addEventListener('click', runCheck);
+  $('mine').addEventListener('keydown', e => { if (e.key === 'Enter') runCheck(); });
+  $('answer').addEventListener('click', e => { if (e.target.id === 'reveal-answer') revealAnswer(); });
+  try { $('hide-answer').checked = localStorage.getItem('hide-answer') === '1'; } catch { /* storage unavailable */ }
+  $('hide-answer').addEventListener('change', e => {
+    try { localStorage.setItem('hide-answer', e.target.checked ? '1' : '0'); } catch { /* storage unavailable */ }
+    if (e.target.checked) { state.revealed = false; gateAnswer(); } else revealAnswer();
+  });
+  initQuiz();
   $('zoom-in').addEventListener('click', () => graph.zoom(1 / 1.4));
   $('zoom-out').addEventListener('click', () => graph.zoom(1.4));
   $('zoom-reset').addEventListener('click', () => graph.reset());
 
   $('f').value = 'x e^x';
   setMode('indef');
+}
+
+// ---------- quiz ----------
+
+function scoreLine() {
+  const s = loadScore();
+  $('q-score').textContent = s.tries
+    ? `Score: ${s.right} of ${s.tries} correct · streak ${s.streak} · best streak ${s.best} (saved in this browser only)`
+    : 'Your score is saved in this browser only.';
+}
+
+function record(right) {
+  const s = loadScore();
+  s.tries++;
+  if (right) { s.right++; s.streak++; s.best = Math.max(s.best, s.streak); } else s.streak = 0;
+  saveScore(s);
+  scoreLine();
+}
+
+function newProblem() {
+  const topic = $('q-topic').value, level = +$('q-level').value, type = $('q-type').value;
+  let p;
+  try { p = makeProblem(topic, level); } catch (e) { $('q-work').innerHTML = `<p class="note">${esc(e.message)}</p>`; return; }
+  state.quiz = { ...p, type, scored: false };
+  setMainVar('x');
+  $('q-problem').innerHTML = M(`\\int ${wrap(p.node)}\\,dx`, true);
+  renderQuizWork();
+  scoreLine();
+}
+
+function renderQuizWork() {
+  const q = state.quiz;
+  if (q.type === 'which') {
+    $('q-work').innerHTML = `<p>Which technique should you use first?</p>
+      <div class="choices">${Object.entries(TECHNIQUES).map(([k, name]) => `<button data-tech="${k}">${esc(name)}</button>`).join('')}</div>
+      <div id="q-feedback"></div>`;
+    return;
+  }
+  $('q-work').innerHTML = `<label class="field-label" for="q-mine">Your antiderivative (end with + C)</label>
+    <div class="input-row"><input id="q-mine" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="e.g.  (x^2 + 4)^4/4 + C"><button id="q-check" class="primary">Check</button></div>
+    <div class="row-actions"><button id="q-hint">Hint (next step)</button><button id="q-solution">Show solution</button></div>
+    <div id="q-feedback"></div><div id="q-steps" class="steps"></div>`;
+  q.stepper = null;
+}
+
+function quizStepper() {
+  const q = state.quiz;
+  if (!q.stepper) q.stepper = new Stepper($('q-steps'), flattenSteps(q.solution.steps));
+  return q.stepper;
+}
+
+function initQuiz() {
+  $('q-new').addEventListener('click', newProblem);
+  for (const id of ['q-topic', 'q-level']) $(id).addEventListener('change', newProblem);
+  $('q-type').addEventListener('change', () => { if (state.quiz) { state.quiz.type = $('q-type').value; renderQuizWork(); } });
+  $('quiz-card').addEventListener('click', e => {
+    const q = state.quiz;
+    if (!q) return;
+    const tech = e.target.closest('[data-tech]');
+    if (tech) {
+      const right = tech.dataset.tech === q.technique;
+      for (const b of $('q-work').querySelectorAll('[data-tech]')) {
+        b.disabled = true;
+        if (b.dataset.tech === q.technique) b.classList.add('right');
+        else if (b === tech) b.classList.add('wrong');
+      }
+      if (!q.scored) { record(right); q.scored = true; }
+      const why = flattenSteps(q.solution.steps).find(s => s.rule !== 'Constant multiple rule' && s.rule !== 'Sum rule');
+      $('q-feedback').innerHTML = feedbackHTML({ level: right ? 'correct' : 'wrong', message: right ? `Correct! ${why && why.why ? why.why : ''}` : `Not this time: the best first step is ${TECHNIQUES[q.technique].toLowerCase()}. ${why && why.why ? why.why : ''}` }) +
+        `<div class="row-actions"><button id="q-try">Now find the antiderivative</button><button class="primary" id="q-next">Next problem</button></div>`;
+      return;
+    }
+    if (e.target.id === 'q-try') { q.type = 'anti'; renderQuizWork(); return; }
+    if (e.target.id === 'q-next') { newProblem(); return; }
+    if (e.target.id === 'q-check') {
+      const r = checkAntiderivative($('q-mine').value, q.node, 'x');
+      if (r.level === 'empty' || r.level === 'error') { $('q-feedback').innerHTML = feedbackHTML(r); return; }
+      const right = r.level === 'correct' || r.level === 'needC';
+      if (!q.scored) { record(right && !q.usedSolution); q.scored = true; }
+      $('q-feedback').innerHTML = feedbackHTML(r) + (right ? '<div class="row-actions"><button class="primary" id="q-next">Next problem</button></div>' : '');
+      return;
+    }
+    if (e.target.id === 'q-hint') { quizStepper().hint(); return; }
+    if (e.target.id === 'q-solution') { q.usedSolution = true; const st = quizStepper(); st.i = st.steps.length - 1; st.shown = true; st.render(); }
+  });
+  $('quiz-card').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'q-mine') $('q-check').click(); });
 }
 
 init();

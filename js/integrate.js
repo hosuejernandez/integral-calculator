@@ -49,7 +49,13 @@ export function integrate(node, v) {
 }
 
 // d/dv(result) must match the integrand at a handful of points.
-function verify(result, integrand, v) {
+// A rough plain-text version of a node for sentences ("x^2 + 1").
+function plain(n) {
+  return toTex(simplify(n)).replace(/\\left|\\right/g, '').replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '($1)/($2)')
+    .replace(/\\(sin|cos|tan|sec|csc|cot|ln|arctan|arcsin|arccos)/g, '$1').replace(/\{|\}/g, '').replace(/\\,|\\/g, '').replace(/\s+/g, ' ').trim();
+}
+
+export function verify(result, integrand, v) {
   let dres;
   try { dres = compile(differentiate(result, v).result); } catch { return false; }
   const f = compile(integrand);
@@ -66,8 +72,37 @@ function verify(result, integrand, v) {
   return good >= 2;
 }
 
-function mk(expr, v, raw, rule, formula, kids = [], note = null) {
-  return { raw, step: { expr, v, result: pretty(raw), rule, formula, note, children: kids.map(k => k.step) } };
+function mk(expr, v, raw, rule, formula, kids = [], note = null, why = null) {
+  return { raw, step: { expr, v, result: pretty(raw), rule, formula, note, why: why || whyFor(rule, v), children: kids.map(k => k.step) } };
+}
+
+// A short, plain-language reason for each rule, shown when students reveal steps one at a time.
+function whyFor(rule, v) {
+  if (rule.includes('(linear substitution)'))
+    return `The inside is linear (a${v} + b), so integrate the outside function and divide by a.`;
+  const R = {
+    'Constant rule': `The integrand has no ${v} in it, so it is a constant: multiply by ${v}.`,
+    'Power rule': `A power of ${v} (not 1/${v}): add 1 to the exponent and divide by the new exponent.`,
+    'Log rule': `This is 1 over (linear) ${v}, which integrates to a natural log of the absolute value.`,
+    'Sum rule': 'Integrate each term separately and add the results.',
+    'Constant multiple rule': 'Pull the constant factor out in front of the integral.',
+    'Exponential rule': 'An exponential: e^u integrates to itself, a^u picks up a factor 1/ln(a).',
+    'Arctangent rule': 'One over a quadratic that never crosses zero: complete the square, which gives an arctangent.',
+    'Arcsine rule': `One over √(a² − ${v}²) is the derivative of an arcsine.`,
+    'Trig substitution': `√(a² − ${v}²) calls for ${v} = a sin θ; the result is a standard formula.`,
+    'Pythagorean identity': 'An odd power (or tan², cot²): peel off one factor and rewrite the rest with sin² + cos² = 1, then substitute.',
+    'Power-reducing identity': 'Only even powers of sine and cosine: use the half-angle identities to lower the powers.',
+    'Expand the polynomial': 'A product or power of polynomials: multiply it out so each term uses the power rule.',
+    'Expand first': 'Multiply out the product so the integral splits into simpler terms.',
+    'Partial fractions': 'A rational function whose denominator factors: split it into simpler fractions you already know how to integrate.',
+    'u-substitution': 'Part of the integrand is the derivative of an inner expression, so substitute u for that expression.',
+    'Integration by parts': 'A product of two different kinds of functions: use integration by parts. LIATE (Log, Inverse trig, Algebraic, Trig, Exponential) picks u.',
+    'Integration by parts (solve for the integral)': 'After integration by parts the original integral shows up again, so solve for it algebraically.',
+    'Integration by parts twice (solve for the integral)': 'An exponential times sine or cosine: integrate by parts twice. The original integral returns, so solve for it.',
+  };
+  if (R[rule]) return R[rule];
+  if (rule.startsWith('Integral of')) return 'This one is in the table of standard integrals.';
+  return null;
 }
 
 // Linear in v?  returns { a, b } (rationals) for a*v + b.
@@ -349,7 +384,8 @@ function uSub(n, v, d, ctx) {
     const k = I(h, U, d + 1, ctx);
     if (!k) continue;
     return mk(n, v, substitute(k.raw, { [U]: u }), 'u-substitution', null, [k],
-      `${U} = ${tex(u)},\\quad d${U} = ${tex(du)}\\,d${v}`);
+      `${U} = ${tex(u)},\\quad d${U} = ${tex(du)}\\,d${v} \\quad\\Rightarrow\\quad \\int ${tex(n)}\\,d${v} = \\int ${tex(h)}\\,d${U}`,
+      `Inside the integrand is ${U} = ${plain(u)}, and its derivative ${plain(du)} is also there (up to a constant), so substitute.`);
   }
   return null;
 }

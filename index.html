@@ -17,11 +17,18 @@
     </header>
 
     <nav class="tabs" id="tabs" role="tablist">
-      <button role="tab" data-mode="indef" aria-selected="true">Indefinite</button>
-      <button role="tab" data-mode="def">Definite</button>
-      <button role="tab" data-mode="riemann">Riemann sums</button>
-      <button role="tab" data-mode="area">Area between curves</button>
-      <button role="tab" data-mode="multi">Double &amp; triple</button>
+      <div class="tab-group"><span class="tab-group-label">AP Calculus</span>
+        <button role="tab" data-mode="indef" aria-selected="true">Indefinite</button>
+        <button role="tab" data-mode="def">Definite</button>
+        <button role="tab" data-mode="riemann">Riemann sums</button>
+        <button role="tab" data-mode="area">Area between curves</button>
+      </div>
+      <div class="tab-group"><span class="tab-group-label">Calc 3</span>
+        <button role="tab" data-mode="multi">Multiple integrals</button>
+      </div>
+      <div class="tab-group"><span class="tab-group-label">Practice</span>
+        <button role="tab" data-mode="quiz">Quiz</button>
+      </div>
     </nav>
 
     <section class="card input-card">
@@ -90,6 +97,7 @@
         <p class="hint">Rows go from the <b>inside out</b>. Inner bounds may use the outer variables (for example y from 0 to x).</p>
         <div class="layers" id="layers"></div>
       </div>
+      <label class="check hide-answer"><input type="checkbox" id="hide-answer"> Hide the answer until I try it myself</label>
       <p class="hint" id="area-hint" hidden>Leave the bounds blank to use the region where the curves cross.</p>
     </section>
 
@@ -100,8 +108,52 @@
       <div id="answer" class="result"></div>
       <div class="row-actions">
         <button id="toggle-steps">Show steps</button>
+        <span class="seg" id="steps-mode" hidden>
+          <button data-smode="all" aria-pressed="true">All steps</button>
+          <button data-smode="one" aria-pressed="false">One at a time</button>
+        </span>
       </div>
       <div id="steps" class="steps" hidden></div>
+      <div class="check-box" id="check-box" hidden>
+        <label class="field-label" for="mine" id="check-label">Check your own answer</label>
+        <div class="input-row">
+          <input id="mine" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+          <button id="check-btn">Check</button>
+        </div>
+        <div id="check-out"></div>
+      </div>
+    </section>
+
+    <section id="quiz-card" class="card" hidden>
+      <h2>Practice quiz</h2>
+      <div class="options">
+        <label>Topic
+          <select id="q-topic">
+            <option value="usub">u-substitution</option>
+            <option value="parts">Integration by parts</option>
+            <option value="pf">Partial fractions</option>
+            <option value="trig">Trig integrals</option>
+            <option value="mixed">Mixed (all topics)</option>
+          </select>
+        </label>
+        <label>Level
+          <select id="q-level">
+            <option value="1">Easy</option>
+            <option value="2" selected>Medium</option>
+            <option value="3">Hard</option>
+          </select>
+        </label>
+        <label>Question
+          <select id="q-type">
+            <option value="anti">Find the antiderivative</option>
+            <option value="which">Which technique?</option>
+          </select>
+        </label>
+        <button id="q-new" class="primary">New problem</button>
+      </div>
+      <div id="q-score" class="answer-note"></div>
+      <div id="q-problem" class="result"></div>
+      <div id="q-work"></div>
     </section>
 
     <section id="detail-card" class="card" hidden></section>

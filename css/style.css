@@ -20,6 +20,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -239,6 +240,8 @@ canvas#graph { width: 100%; height: 100%; display: block; touch-action: none; cu
 .graph-controls button { min-width: 40px; }
 
 @media (max-width: 600px) {
+  .options > label.examples { flex-basis: 100%; }
+  .examples select { width: 100%; }
   main { padding: 12px 16px; }
   .card { padding: 14px; }
   .input-row { flex-direction: column; }
@@ -247,7 +250,10 @@ canvas#graph { width: 100%; height: 100%; display: block; touch-action: none; cu
 }
 
 /* integral calculator */
-.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 12px; }
+.tab-group { display: flex; gap: 6px; align-items: center; overflow-x: auto; max-width: 100%; padding-bottom: 2px; }
+.tab-group-label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); white-space: nowrap; }
+.tabs button { white-space: nowrap; }
 .tabs button { border-radius: 999px; padding: 6px 14px; background: #fff; }
 .tabs button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 .g-row { margin-top: 8px; align-items: center; }
@@ -267,3 +273,24 @@ canvas#graph { width: 100%; height: 100%; display: block; touch-action: none; cu
 .steps-block { margin: 6px 0 12px; }
 .answer-note { color: var(--muted); font-size: 0.92rem; }
 .big { font-size: 1.15rem; }
+
+/* study tools */
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.one-step { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+.one-step.current { border-color: var(--accent); }
+.one-step .q { display: flex; gap: 8px; align-items: center; font-weight: 600; margin-bottom: 6px; flex-wrap: wrap; }
+.one-step .q .num, .stage .num { display: inline-flex; justify-content: center; align-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 0.8rem; flex: none; }
+.one-step .a { margin: 4px 0; }
+.check-box { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+.feedback { margin-top: 8px; padding: 8px 12px; border-radius: 8px; overflow-x: auto; }
+.feedback.ok { background: var(--inc-soft); color: #14532d; }
+.feedback.close { background: var(--warn-soft); color: #713f12; }
+.feedback.bad { background: var(--dec-soft); color: #7f1d1d; }
+.hide-answer { margin-top: 12px; }
+.hidden-answer { color: var(--muted); font-size: 1rem; }
+.choices { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.choices button.right { background: var(--inc-soft); border-color: var(--inc); }
+.choices button.wrong { background: var(--dec-soft); border-color: var(--dec); }
+#quiz-card .options label { display: flex; gap: 6px; align-items: center; font-weight: 600; }
