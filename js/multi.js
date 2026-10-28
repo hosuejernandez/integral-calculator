@@ -78,11 +78,11 @@ export function convert(node, sys) {
 }
 
 // What to compute over the region
-export function applications(kind, density, layers, sys) {
+export function applications(kind, density, layers, sys, env = {}) {
   const J = sys.jac;
   const withJ = n => pretty(J ? mul([n, J]) : n);
   const coord = name => (sys.subs && sys.subs[name] ? sys.subs[name] : S(name));
-  const run = integrand => iterated(withJ(convert(integrand, sys)), layers);
+  const run = integrand => iterated(withJ(convert(integrand, sys)), layers, env);
   const one = run(num(1));
   if (kind === 'measure') return { measure: one };
   if (kind === 'average') return { measure: one, total: run(density) };

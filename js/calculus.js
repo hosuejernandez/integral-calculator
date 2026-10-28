@@ -80,7 +80,29 @@ const niceTex = x => { const r = recognize(x); return r && Math.abs(r.x - x) < 1
 const boundTex = x => (x === Infinity ? '\\infty' : x === -Infinity ? '-\\infty' : niceTex(x));
 
 // a, b: { node, value } where node is null for +-Infinity.
-export function definite(f, v, a, b) {
+// params = { nodes: { a: 2 }, env: { a: 2 } } supplies values for letters other than v: the exact
+// answer stays symbolic, while every numeric check runs with those values plugged in.
+export function definite(f, v, a, b, params = null) {
+  const letters = new Set([...freeSyms(f), ...(a.node ? freeSyms(a.node) : []), ...(b.node ? freeSyms(b.node) : [])]);
+  letters.delete(v);
+  if (!letters.size || !params) return definite0(f, v, a, b);
+  const S = n => simplify(substitute(n, params.nodes));
+  const bound = B => (B.node ? { node: S(B.node), value: compile(S(B.node))({}) } : B);
+  const numeric = definite0(S(f), v, bound(a), bound(b));
+  const anti = integrate(f, v);
+  const out = { ...numeric, symbolic: true, letters: [...letters], anti, F: anti ? anti.result : null, exact: null, notes: [...numeric.notes] };
+  if (!numeric.improper && anti && a.node && b.node) {
+    const exact = pretty(sub(substitute(anti.result, { [v]: b.node }), substitute(anti.result, { [v]: a.node })));
+    const check = compile(S(exact))({});
+    if (isFinite(check) && Math.abs(check - numeric.value) < 1e-6 * (1 + Math.abs(numeric.value))) {
+      return { ...out, method: 'ftc', exact, Fa: at(anti.result, v, a.node), Fb: at(anti.result, v, b.node) };
+    }
+  }
+  if (numeric.improper) out.notes.push('This is an improper integral with letters in it. Whether it converges can depend on their values, so the result shown uses the values you chose.');
+  return out;
+}
+
+function definite0(f, v, a, b) {
   const anti = integrate(f, v);
   const F = anti ? anti.result : null;
   const fN = fnOf(f, v);
@@ -228,23 +250,23 @@ export function areaBetween(f, g, v, bounds) {
 // ---------- iterated integrals ----------
 
 // layers are listed from the inside out: [{ v, lo, hi }] with lo / hi as expression nodes.
-export function iterated(integrand, layers) {
+export function iterated(integrand, layers, env = {}) {
   let cur = integrand;
   const steps = [];
   for (const L of layers) {
     const anti = integrate(cur, L.v);
-    if (!anti) { steps.push({ ...L, integrand: cur, failed: true }); return { steps, exact: null, value: numericIterated(integrand, layers) }; }
+    if (!anti) { steps.push({ ...L, integrand: cur, failed: true }); return { steps, exact: null, value: numericIterated(integrand, layers, true, env) }; }
     const upper = substitute(anti.result, { [L.v]: L.hi }), lower = substitute(anti.result, { [L.v]: L.lo });
     const next = pretty(sub(upper, lower));
     steps.push({ ...L, integrand: cur, F: anti.result, antiSteps: anti.steps, upper: pretty(upper), lower: pretty(lower), result: next });
     cur = next;
   }
   const leftover = freeSyms(cur);
-  const value = leftover.size ? NaN : compile(cur)({});
+  const value = [...leftover].every(l => l in env) ? compile(cur)(env) : NaN;
   // cheap numeric check first; a closer look only when it disagrees (square roots converge slowly)
-  let check = numericIterated(integrand, layers, false);
-  if (!leftover.size && isFinite(check) && Math.abs(value - check) > 1e-6 * (1 + Math.abs(check))) {
-    check = numericIterated(integrand, layers, true);
+  let check = numericIterated(integrand, layers, false, env);
+  if (isFinite(value) && isFinite(check) && Math.abs(value - check) > 1e-6 * (1 + Math.abs(check))) {
+    check = numericIterated(integrand, layers, true, env);
     if (Math.abs(value - check) > 1e-4 * (1 + Math.abs(check))) return { steps, exact: null, value: check, mismatch: true };
   }
   return { steps, exact: cur, value };
@@ -277,10 +299,10 @@ function glInt(g, a, b, panels = 4) {
   return s * h / 2;
 }
 
-export function numericIterated(integrand, layers, fine = true) {
+export function numericIterated(integrand, layers, fine = true, env0 = {}) {
   const F = compile(integrand);
   const bounds = layers.map(L => ({ v: L.v, lo: compile(L.lo), hi: compile(L.hi) }));
-  const env = {}; // one shared, mutable environment keeps this fast
+  const env = { ...env0 }; // one shared, mutable environment keeps this fast
   const rec = k => {
     if (k < 0) return F(env);
     const L = bounds[k];

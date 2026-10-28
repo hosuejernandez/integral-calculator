@@ -124,5 +124,26 @@ const other = lineIntegral({ kind: 'work', comps: [P('t^3'), P('t')], a: B('0'),
 check('conservative path independence', `${toTex(par.res.exact)} ${toTex(other.res.exact)} ${toTex(par.conservative.potential)}`, '1 1 x^{2} y');
 check('scalar ds', toTex(LI({ kind: 'scalar', comps: [P('cos(t)'), P('sin(t)')], f: P('x^2') }).res.exact), '\\pi');
 
+// letters treated as constants (CAS behavior)
+{
+  const { num: NN } = await import('../js/expr.js');
+  const prm = o => ({ nodes: Object.fromEntries(Object.entries(o).map(([k, v]) => [k, NN(v)])), env: o });
+  const bnd = s => { const n = P(s); return { node: n, value: NaN }; };
+  setMainVar('x');
+  check('∫0^b x^2', toTex(definite(P('x^2'), 'x', bnd('0'), bnd('b'), prm({ b: 2 })).exact), '\\frac{b^{3}}{3}');
+  check('∫ k sin x', toTex(definite(P('k sin x'), 'x', B('0'), B('pi'), prm({ k: 3 })).exact), '2 k');
+  const imp = definite(P('e^(-a x)'), 'x', B('0'), B('inf'), prm({ a: 2 }));
+  check('improper with a = 2', imp.value === 0.5 && imp.notes.length > 0, true);
+  check('∭ a dV', toTex(iterated(P('a'), L([['z', '0', '1'], ['y', '0', '1'], ['x', '0', '1']]), { a: 2 }).exact), 'a');
+  const cmk = MU.applications('center', P('k'), L([['z', '0', '1 - x - y'], ['y', '0', '1 - x'], ['x', '0', '1']]), MU.SYSTEMS.cartesian3, { k: 2 });
+  check('mass k/6', toTex(cmk.mass.exact), '\\frac{k}{6}');
+  check('centroid independent of k', cmk.moments.map(m => (m.res.value / cmk.mass.value).toFixed(6)).join(','), '0.250000,0.250000,0.250000');
+  setMainVar('t');
+  const la = lineIntegral({ kind: 'work', comps: [P('cos(t)'), P('sin(t)')], a: B('0'), b: B('2pi'), F: [P('-a y'), P('a x')], params: prm({ a: 2 }) });
+  check('circulation 2πa', toTex(la.res.exact), '2 \\pi a');
+  setMainVar('x');
+  check('area with a = 2', toTex(areaBetween(P('2x'), P('x^2'), 'x', null).exactTotal), '\\frac{4}{3}');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

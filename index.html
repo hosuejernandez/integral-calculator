@@ -6,9 +6,9 @@
   <title>Integral Calculator</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=mvqyyzt0">
-  <script type="importmap">{"imports":{"./js/app.js":"./js/app.js?v=mvqyyzt0","./js/calculus.js":"./js/calculus.js?v=mvqyyzt0","./js/diff.js":"./js/diff.js?v=mvqyyzt0","./js/expr.js":"./js/expr.js?v=mvqyyzt0","./js/graph.js":"./js/graph.js?v=mvqyyzt0","./js/graph3d.js":"./js/graph3d.js?v=mvqyyzt0","./js/integrate.js":"./js/integrate.js?v=mvqyyzt0","./js/learn.js":"./js/learn.js?v=mvqyyzt0","./js/line.js":"./js/line.js?v=mvqyyzt0","./js/multi.js":"./js/multi.js?v=mvqyyzt0","./js/quiz.js":"./js/quiz.js?v=mvqyyzt0","./js/simplify.js":"./js/simplify.js?v=mvqyyzt0","./js/solve.js":"./js/solve.js?v=mvqyyzt0","./js/volume.js":"./js/volume.js?v=mvqyyzt0"}}</script>
-  <script type="module" src="js/app.js?v=mvqyyzt0"></script>
+  <link rel="stylesheet" href="css/style.css?v=mvsbqqdl">
+  <script type="importmap">{"imports":{"./js/app.js":"./js/app.js?v=mvsbqqdl","./js/calculus.js":"./js/calculus.js?v=mvsbqqdl","./js/diff.js":"./js/diff.js?v=mvsbqqdl","./js/expr.js":"./js/expr.js?v=mvsbqqdl","./js/graph.js":"./js/graph.js?v=mvsbqqdl","./js/graph3d.js":"./js/graph3d.js?v=mvsbqqdl","./js/integrate.js":"./js/integrate.js?v=mvsbqqdl","./js/learn.js":"./js/learn.js?v=mvsbqqdl","./js/line.js":"./js/line.js?v=mvsbqqdl","./js/multi.js":"./js/multi.js?v=mvsbqqdl","./js/quiz.js":"./js/quiz.js?v=mvsbqqdl","./js/simplify.js":"./js/simplify.js?v=mvsbqqdl","./js/solve.js":"./js/solve.js?v=mvsbqqdl","./js/volume.js":"./js/volume.js?v=mvsbqqdl"}}</script>
+  <script type="module" src="js/app.js?v=mvsbqqdl"></script>
 </head>
 <body>
   <main>
@@ -182,6 +182,7 @@
         <p class="hint">Rows go from the <b>inside out</b>. Inner bounds may use the outer variables (for example y from 0 to x).</p>
         <div class="layers" id="layers"></div>
       </div>
+      <div id="params" class="params" hidden></div>
       <label class="check hide-answer"><input type="checkbox" id="hide-answer"> Hide the answer until I try it myself</label>
       <p class="hint" id="area-hint" hidden>Leave the bounds blank to use the region where the curves cross.</p>
     </section>

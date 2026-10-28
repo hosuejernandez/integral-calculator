@@ -96,7 +96,7 @@ const EXAMPLES = {
   ],
 };
 
-const state = { mode: 'indef', lastInput: null, stepRoot: null, stepMode: 'all', check: null, revealed: false };
+const state = { params: new Map(), mode: 'indef', lastInput: null, stepRoot: null, stepMode: 'all', check: null, revealed: false };
 let graph, graph3d;
 
 // ---------- reading inputs ----------
@@ -108,7 +108,70 @@ function readExpr(id, what) {
   if (!src.trim()) throw new Error(`Type ${what}.`);
   const n = parse(src);
   if (n.type === 'eq') throw new Error(`${what[0].toUpperCase() + what.slice(1)} should not contain "=".`);
-  return simplify(n);
+  return state.plug ? plugIn(simplify(n)) : simplify(n);
+}
+
+// ---------- constants (letters that are not integration variables) ----------
+
+// letters -> their chosen values; used for graphs, decimals and numeric checks
+const P = () => state.P || { letters: [], env: {}, nodes: {} };
+const plugIn = n => (P().letters.length ? simplify(substitute(n, P().nodes)) : n);
+const hasLetters = n => !!n && [...freeSyms(n)].some(l => P().letters.includes(l));
+const valuesLine = value => (P().letters.length && isFinite(value)
+  ? `<p class="answer-note">With ${P().letters.map(l => M(`${symTex(l)} = ${toTex(P().nodes[l])}`)).join(', ')}: ${M(valueTex(value))}</p>` : '');
+// exact answer: symbolic answers get no "≈ decimal" (that decimal belongs to the chosen values)
+const symTexOr = (exact, value) => (hasLetters(exact) ? toTex(exact) : exactTex(exact, value));
+
+function tryParse(id) {
+  const el = $(id);
+  if (!el || !el.value.trim() || INF.test(el.value)) return null;
+  try { const n = parse(el.value); return n.type === 'eq' ? null : n; } catch { return null; }
+}
+
+// which letters are variables of integration in the current tab
+function integrationLetters() {
+  const mode = state.mode;
+  const wrt = (() => { try { return readVar($('wrt').value.trim() || 'x'); } catch { return 'x'; } })();
+  if (mode === 'multi') {
+    const vars = [...$('layers').querySelectorAll('.layer input.var')].map(i => i.value.trim()).filter(Boolean);
+    return [...vars, ...(sysOf().subs ? ['x', 'y', 'z'] : [])];
+  }
+  if (mode === 'line') return ['t', 'x', 'y', 'z'];
+  if (mode === 'ftc' && $('ftc-kind').value === 'ftc1') {
+    const inBounds = new Set([...['a', 'b'].map(tryParse).filter(Boolean).flatMap(n => [...freeSyms(n)])]);
+    inBounds.delete(wrt);
+    const X = inBounds.has('x') ? 'x' : inBounds.size === 1 ? [...inBounds][0] : 'x';
+    return [wrt, X];
+  }
+  return [wrt];
+}
+
+function inputsForMode() {
+  const ids = { indef: ['f'], def: ['f', 'a', 'b'], riemann: ['f', 'a', 'b'], area: ['f', 'g', 'a', 'b'], volume: ['f', 'g', 'a', 'b', 'v-k', 'v-h'], ftc: ['f', 'a', 'b'], line: ['l-x', 'l-y', 'l-z', 'l-a', 'l-b', 'l-P', 'l-Q', 'l-R', 'l-f'] }[state.mode];
+  if (state.mode === 'multi') return ['f', ...[...$('layers').querySelectorAll('.layer input:not(.var)')].map((el, i) => { el.id = el.id || `layer-in-${i}`; return el.id; })];
+  return ids || [];
+}
+
+function setupParams() {
+  const vars = new Set(integrationLetters());
+  const letters = [...new Set(inputsForMode().map(tryParse).filter(Boolean).flatMap(n => [...freeSyms(n)]))].filter(l => !vars.has(l)).sort();
+  const box = $('params');
+  const env = {}, nodes = {};
+  for (const l of letters) {
+    const src = state.params.get(l) ?? '1';
+    let node;
+    try { node = simplify(parse(src)); } catch { throw new Error(`The value of ${l} must be a number.`); }
+    if (freeSyms(node).size) throw new Error(`The value of ${l} must be a number.`);
+    nodes[l] = node; env[l] = compile(node)({});
+  }
+  state.P = { letters, env, nodes };
+  box.hidden = !letters.length;
+  const signature = letters.join(',');
+  if (box.dataset.sig !== signature) {
+    box.dataset.sig = signature;
+    box.innerHTML = `<span class="lead">Other letters are treated as constants${['riemann', 'area', 'volume'].includes(state.mode) ? '. This tab needs numbers, so it uses these values' : ', so answers stay in terms of them. Values used for graphs and decimals'}:</span>` +
+      letters.map(l => `<label>${M(symTex(l))} = <input type="text" data-param="${esc(l)}" value="${esc(state.params.get(l) ?? '1')}"></label>`).join('');
+  }
 }
 
 function readVar(str) {
@@ -125,10 +188,11 @@ function readBound(id, label, { allowInf = true, allowVars = [] } = {}) {
     if (!allowInf) throw new Error(`The ${label} must be a number here, not ∞.`);
     return { node: null, value: m[1] === '-' ? -Infinity : Infinity };
   }
-  const node = simplify(parse(src));
-  const bad = [...freeSyms(node)].filter(s => !allowVars.includes(s));
+  let node = simplify(parse(src));
+  if (state.plug) node = plugIn(node);
+  const bad = [...freeSyms(node)].filter(s => !allowVars.includes(s) && !P().letters.includes(s));
   if (bad.length) throw new Error(`The ${label} can't contain the letter ${bad[0]}.`);
-  return { node, value: allowVars.length ? NaN : compile(node)({}) };
+  return { node, value: allowVars.length ? NaN : compile(plugIn(node))({}) };
 }
 
 const boundShow = b => (b.node ? toTex(b.node) : boundTex(b.value));
@@ -206,11 +270,11 @@ function runIndefinite() {
     showSteps(r.steps);
   }
   // graph f and one antiderivative
-  if (freeSyms(f).size > 1 || (freeSyms(f).size === 1 && !freeSyms(f).has(v))) { $('graph-card').hidden = true; return; }
-  const curves = [{ f: fnOf(f, v), color: COLORS.f, label: 'f' }];
+  if ([...freeSyms(plugIn(f))].some(l => l !== v)) { $('graph-card').hidden = true; return; }
+  const curves = [{ f: fnOf(plugIn(f), v), color: COLORS.f, label: 'f' }];
   let legend = `<span><i style="background:${COLORS.f}"></i>${M(`f(${vt}) = ${toTex(f)}`)}</span>`;
   if (r) {
-    curves.push({ f: fnOf(r.result, v), color: COLORS.F, label: 'F', dash: [7, 5] });
+    curves.push({ f: fnOf(plugIn(r.result), v), color: COLORS.F, label: 'F', dash: [7, 5] });
     legend += `<span><i style="background:${COLORS.F}"></i>${M(`F(${vt})`)} with ${M('C = 0')} (dashed)</span>`;
   }
   showGraph({ curves, xName: v, hint: 'F rises where f is positive and falls where f is negative. Move over the graph to compare.' }, legend);
@@ -220,18 +284,17 @@ function runDefinite() {
   const v = readVar($('wrt').value.trim());
   setMainVar(v);
   const f = readExpr('f', 'the integrand');
-  if ([...freeSyms(f)].some(s => s !== v)) throw new Error(`For a definite integral, the integrand can only use ${v}. Replace other letters with numbers.`);
   const A = readBound('a', 'lower bound'), B = readBound('b', 'upper bound');
   const vt = symTex(v);
-  const r = definite(f, v, A, B);
-  state.check = { kind: 'value', value: r.value, diverges: !!r.diverges };
+  const r = definite(f, v, A, B, P());
+  state.check = { kind: 'value', value: r.value, diverges: !!r.diverges, exact: r.exact };
   const integral = `\\int_{${boundShow(A)}}^{${boundShow(B)}} ${wrap(f)}\\,d${vt}`;
   showSteps(r.anti ? r.anti.steps : null);
 
   let answer, body = '';
   if (r.diverges) answer = M(`${integral} \\text{ diverges}`, true);
-  else if (r.exact) answer = M(`${integral} = ${exactTex(r.exact, r.value)}`, true);
-  else answer = M(`${integral} = ${valueTex(r.value)}`, true);
+  else if (r.exact) answer = M(`${integral} = ${symTexOr(r.exact, r.value)}`, true) + (hasLetters(r.exact) ? valuesLine(r.value) : '');
+  else answer = M(`${integral} = ${valueTex(r.value)}`, true) + (r.symbolic ? valuesLine(r.value) : '');
   setAnswer('Definite integral', answer + (r.method === 'numeric' || r.method === 'numeric-limits' ? `<p class="answer-note">Numeric value (adaptive Simpson's rule).${closeTo(r.value)}</p>` : ''));
 
   const antiLine = r.F ? `<div class="math-line">${M(`F(${vt}) = ${toTex(r.F)}`, true)}</div>` : `<p>${esc(NO_ANTI)}</p>`;
@@ -239,7 +302,7 @@ function runDefinite() {
     body = stage(1, 'Find an antiderivative', antiLine) +
       stage(2, 'Apply the Fundamental Theorem of Calculus',
         `<div class="math-line">${M(`\\int_a^b f(${vt})\\,d${vt} = F(b) - F(a)`, true)}</div>
-         <div class="math-line">${M(`\\Big[ ${toTex(r.F)} \\Big]_{${boundShow(A)}}^{${boundShow(B)}} = \\left(${toTex(r.Fb)}\\right) - \\left(${toTex(r.Fa)}\\right) = ${exactTex(r.exact, r.value)}`, true)}</div>
+         <div class="math-line">${M(`\\Big[ ${toTex(r.F)} \\Big]_{${boundShow(A)}}^{${boundShow(B)}} = \\left(${toTex(r.Fb)}\\right) - \\left(${toTex(r.Fa)}\\right) = ${symTexOr(r.exact, r.value)}`, true)}</div>
          <p class="note">The definite integral is a <b>signed</b> area: area above the ${M(vt)}-axis counts as positive and area below counts as negative.</p>`);
   } else if (r.method === 'numeric') {
     body = stage(1, 'Find an antiderivative', antiLine) +
@@ -268,7 +331,7 @@ function runDefinite() {
   $('detail-card').innerHTML = `<h2>${r.improper ? 'Improper integral' : 'Fundamental Theorem of Calculus'}</h2>${r.notes.map(n => `<p class="note">${esc(n)}</p>`).join('')}${body}`;
   $('detail-card').hidden = false;
 
-  const fN = fnOf(f, v);
+  const fN = fnOf(plugIn(f), v);
   const lo = Math.min(A.value, B.value), hi = Math.max(A.value, B.value);
   const wl = isFinite(lo) ? lo : (isFinite(hi) ? hi - 10 : -10), wh = isFinite(hi) ? hi : wl + 10;
   showGraph({
@@ -430,7 +493,7 @@ function readLayers() {
   layers.forEach((L, i) => {
     const outer = vars.slice(i + 1);
     for (const s of [...freeSyms(L.lo), ...freeSyms(L.hi)]) {
-      if (!outer.includes(s)) throw new Error(`The bounds for d${L.v} can only use outer variables (${outer.join(', ') || 'none'}), not ${s}.`);
+      if (!outer.includes(s) && !P().letters.includes(s)) throw new Error(`The bounds for d${L.v} can only use outer variables (${outer.join(', ') || 'none'}), not ${s}.`);
     }
   });
   return layers;
@@ -452,7 +515,7 @@ function layerStages(r, layers, start) {
        <details class="mini"><summary>Steps for the antiderivative</summary><div class="steps">${stepTree(s.antiSteps)}</div></details>`);
   }).join('');
 }
-const resTex = r => (r.exact ? exactTex(r.exact, r.value) : valueTex(r.value));
+const resTex = r => (r.exact ? symTexOr(r.exact, r.value) : valueTex(r.value));
 
 function runMulti() {
   const sys = sysOf();
@@ -460,7 +523,7 @@ function runMulti() {
   const layers = readLayers();
   const dims = layers.length;
   const f = app === 'measure' ? num(1) : readExpr('f', app === 'mass' || app === 'center' ? 'the density' : 'the integrand');
-  const allowed = new Set([...layers.map(L => L.v), ...(sys.subs ? ['x', 'y', 'z'] : [])]);
+  const allowed = new Set([...layers.map(L => L.v), ...(sys.subs ? ['x', 'y', 'z'] : []), ...P().letters]);
   const extra = [...freeSyms(f)].filter(s => !allowed.has(s));
   if (extra.length) throw new Error(`The integrand uses ${extra[0]}, which is not one of the integration variables.`);
   setMainVar(layers[dims - 1].v);
@@ -482,7 +545,7 @@ function runMulti() {
   let marker = null, answerHTML, detailTitle = 'Integrate from the inside out', body = '', mainR;
   const titleBase = dims === 3 ? 'Triple integral' : 'Double integral';
   if (app === 'center') {
-    const res = applications('center', f, layers, sys);
+    const res = applications('center', f, layers, sys, P().env);
     const M0 = res.mass;
     mainR = M0;
     const coords = res.moments.map(m => {
@@ -491,32 +554,32 @@ function runMulti() {
     });
     const point = `\\left(${coords.map(c => (c.exact ? toTex(c.exact) : fmt(c.value))).join(',\\ ')}\\right)`;
     answerHTML = M(`(\\bar{x},\\ \\bar{y}${dims === 3 ? ',\\ \\bar{z}' : ''}) = ${point}`, true) +
-      (coords.some(c => !c.exact || c.exact.type !== 'num') ? `<p class="answer-note">≈ (${coords.map(c => fmt(c.value)).join(', ')})</p>` : '');
+      (coords.some(c => !c.exact || c.exact.type !== 'num') ? `<p class="answer-note">${P().letters.length ? `With ${P().letters.map(l => M(`${symTex(l)} = ${toTex(P().nodes[l])}`)).join(', ')}: ` : ''}≈ (${coords.map(c => fmt(c.value)).join(', ')})</p>` : '');
     state.check = null;
     marker = coords.map(c => c.value);
     detailTitle = 'Center of mass';
     body = stage(offset, 'Mass', `<div class="math-line">${M(`M = ${set} \\rho\\,${dA} = ${resTex(M0)}`, true)}</div>`) +
-      stage(offset + 1, 'Moments and the center', coords.map(c => `<div class="math-line">${M(`\\bar{${c.axis}} = \\frac{1}{M}${set} ${c.axis}\\,\\rho\\,${dA} = \\frac{${resTex(c.mom).replace(/\\approx.*/, '')}}{${resTex(M0).replace(/\\approx.*/, '')}} = ${c.exact ? exactTex(c.exact, c.value) : valueTex(c.value)}`, true)}</div>`).join('')) +
+      stage(offset + 1, 'Moments and the center', coords.map(c => `<div class="math-line">${M(`\\bar{${c.axis}} = \\frac{1}{M}${set} ${c.axis}\\,\\rho\\,${dA} = \\frac{${resTex(c.mom).replace(/\\approx.*/, '')}}{${resTex(M0).replace(/\\approx.*/, '')}} = ${c.exact ? symTexOr(c.exact, c.value) : valueTex(c.value)}`, true)}</div>`).join('')) +
       `<details class="mini"><summary>Steps for the mass integral</summary>${layerStages(M0, layers, offset + 2)}</details>`;
   } else if (app === 'average') {
-    const res = applications('average', f, layers, sys);
+    const res = applications('average', f, layers, sys, P().env);
     const T = res.total, A = res.measure;
     mainR = T;
     const exact = T.exact && A.exact ? pretty(mul([T.exact, pow(A.exact, num(-1))])) : null;
     const value = T.value / A.value;
-    answerHTML = M(`f_{\\text{avg}} = ${exact ? exactTex(exact, value) : valueTex(value)}`, true);
-    state.check = { kind: 'value', value };
+    answerHTML = M(`f_{\\text{avg}} = ${exact ? symTexOr(exact, value) : valueTex(value)}`, true) + (hasLetters(exact) ? valuesLine(value) : '');
+    state.check = { kind: 'value', value, exact };
     detailTitle = 'Average value over the region';
     body = stage(offset, 'Size of the region', `<div class="math-line">${M(`${dims === 3 ? 'V' : 'A'} = ${set} 1\\,${dA} = ${resTex(A)}`, true)}</div>`) +
       stage(offset + 1, 'Integral of the function', `<div class="math-line">${M(`${set} f\\,${dA} = ${resTex(T)}`, true)}</div>`) +
-      stage(offset + 2, 'Divide', `<div class="math-line">${M(`f_{\\text{avg}} = \\frac{1}{${dims === 3 ? 'V' : 'A'}}${set} f\\,${dA} = ${exact ? exactTex(exact, value) : valueTex(value)}`, true)}</div>`) +
+      stage(offset + 2, 'Divide', `<div class="math-line">${M(`f_{\\text{avg}} = \\frac{1}{${dims === 3 ? 'V' : 'A'}}${set} f\\,${dA} = ${exact ? symTexOr(exact, value) : valueTex(value)}`, true)}</div>`) +
       `<details class="mini"><summary>Steps for the integral of the function</summary>${layerStages(T, layers, offset + 3)}</details>`;
   } else {
-    const r = iterated(full, layers);
+    const r = iterated(full, layers, P().env);
     mainR = r;
-    state.check = { kind: 'value', value: r.value };
+    state.check = { kind: 'value', value: r.value, exact: r.exact };
     const lhs = app === 'measure' ? (dims === 3 ? 'V' : 'A') : app === 'mass' ? 'M' : `${intsTex(layers)} ${wrap(f)}\\,${sys.subs ? dA : dsTex(layers)}`;
-    answerHTML = M(`${lhs} = ${resTex(r)}`, true) + (r.exact ? '' : `<p class="answer-note">Numeric value (Gauss–Legendre quadrature).${closeTo(r.value)}</p>`);
+    answerHTML = M(`${lhs} = ${resTex(r)}`, true) + (hasLetters(r.exact) ? valuesLine(r.value) : '') + (r.exact ? '' : `<p class="answer-note">Numeric value (Gauss–Legendre quadrature).${closeTo(r.value)}</p>`);
     if (r.mismatch) body += '<p class="note">The exact steps did not match a numeric check, so the numeric value is shown.</p>';
     body += layerStages(r, layers, offset);
   }
@@ -526,7 +589,8 @@ function runMulti() {
   $('detail-card').innerHTML = `<h2>${detailTitle}</h2>${coordStage}${body}`;
   $('detail-card').hidden = false;
   state.multi = { layers, sys };
-  drawMulti(conv, layers, sys, marker);
+  const plugged = layers.map(L => ({ v: L.v, lo: plugIn(L.lo), hi: plugIn(L.hi) }));
+  drawMulti(plugIn(conv), plugged, sys, marker);
   void mainR;
 }
 
@@ -666,12 +730,12 @@ function drawMulti(conv, layers, sys, mark) {
 function reverseNow() {
   const s = state.multi;
   if (!s || s.layers.length !== 2 || s.sys.subs) return;
-  const r = reverseOrder(s.layers);
+  const r = reverseOrder(s.layers.map(L => ({ v: L.v, lo: plugIn(L.lo), hi: plugIn(L.hi) })));
   let html;
   if (r.error) html = `<p class="note">${esc(r.error)}</p>`;
   else {
     const fNode = $('m-app').value === 'measure' ? num(1) : readExpr('f', 'the integrand');
-    const vals = r.bands.map(B => iterated(fNode, B.layers));
+    const vals = r.bands.map(B => iterated(plugIn(fNode), B.layers));
     const total = vals.reduce((t, x) => t + x.value, 0);
     const integrals = r.bands.map(B => `${intsTex(B.layers)} ${wrap(fNode)}\\,${dsTex(B.layers)}`).join(' + ');
     html = `<p>Read the region with ${r.bands.length > 1 ? 'horizontal strips. The left and right boundaries change partway, so it takes ' + r.bands.length + ' integrals' : 'strips the other way'}:</p>
@@ -797,10 +861,9 @@ function runFtc() {
   if ($('ftc-kind').value === 'avg') return runAverage();
   const t = readVar($('wrt').value.trim() || 't');
   const f = readExpr('f', 'the integrand f(t)');
-  if ([...freeSyms(f)].some(s => s !== t)) throw new Error(`The integrand should only use ${t}, the variable of integration.`);
   if (!$('a').value.trim() || !$('b').value.trim()) throw new Error('Fill in both bounds. At least one should contain x, like 0 and x².');
   const lower = simplify(parse($('a').value)), upper = simplify(parse($('b').value));
-  const letters = [...new Set([...freeSyms(lower), ...freeSyms(upper)])];
+  const letters = [...new Set([...freeSyms(lower), ...freeSyms(upper)])].filter(l => !P().letters.includes(l));
   if (letters.includes(t)) throw new Error(`The bounds can't use ${t}; that letter is the variable of integration.`);
   if (letters.length > 1) throw new Error('The bounds should use only one variable, like x.');
   const X = letters[0] || 'x';
@@ -838,10 +901,10 @@ function runFtc() {
   // graph f(t), shading the accumulated area at the slider's x
   $('ftc-x-name').textContent = X;
   const x0 = +$('ftc-x').value;
-  const lo = compile(lower)({ [X]: x0 }), hi = compile(upper)({ [X]: x0 });
-  const fN = fnOf(f, t);
+  const lo = compile(plugIn(lower))({ [X]: x0 }), hi = compile(plugIn(upper))({ [X]: x0 });
+  const fN = fnOf(plugIn(f), t);
   const area = quad(fN, Math.min(lo, hi), Math.max(lo, hi)) * (hi >= lo ? 1 : -1);
-  const dA = compile(result)({ [X]: x0 });
+  const dA = compile(plugIn(result))({ [X]: x0 });
   $('graph-title').textContent = 'Accumulated area';
   showGraph({
     curves: [{ f: fN, color: COLORS.f, label: 'f' }], xName: t, window: [Math.min(lo, hi, 0), Math.max(lo, hi, 1)],
@@ -855,30 +918,29 @@ function runAverage() {
   const v = readVar($('wrt').value.trim() || 'x');
   setMainVar(v);
   const f = readExpr('f', 'the function');
-  if ([...freeSyms(f)].some(s => s !== v)) throw new Error(`The function can only use ${v}.`);
   const A = readBound('a', 'left endpoint a', { allowInf: false }), B = readBound('b', 'right endpoint b', { allowInf: false });
   if (!(A.value < B.value)) throw new Error('Average value needs a < b.');
   const vt = symTex(v);
-  const r = definite(f, v, A, B);
+  const r = definite(f, v, A, B, P());
   const width = pretty(sub(B.node, A.node));
   const avgExact = r.exact ? pretty(mul([pow(width, num(-1)), r.exact])) : null;
   const avg = r.value / (B.value - A.value);
-  const avgTex = avgExact ? exactTex(avgExact, avg) : valueTex(avg);
-  state.check = { kind: 'value', value: avg };
-  setAnswer('Average value', M(`f_{\\text{avg}} = ${avgTex}`, true));
+  const avgTex = avgExact ? symTexOr(avgExact, avg) : valueTex(avg);
+  state.check = { kind: 'value', value: avg, exact: avgExact };
+  setAnswer('Average value', M(`f_{\\text{avg}} = ${avgTex}`, true) + (hasLetters(avgExact) || (!avgExact && r.symbolic) ? valuesLine(avg) : ''));
   showSteps(r.anti ? r.anti.steps : null);
-  const level = avgExact || num(Math.round(avg * 1e9), 1e9);
-  const cs = intersections(pretty(sub(f, level)), v, A.value, B.value);
+  const level = avgExact && !hasLetters(avgExact) ? avgExact : num(Math.round(avg * 1e9), 1e9);
+  const cs = intersections(pretty(sub(plugIn(f), level)), v, A.value, B.value);
   $('detail-card').innerHTML = `<h2>Average value</h2>` +
     stage(1, 'The formula', `<div class="math-line">${M(`f_{\\text{avg}} = \\frac{1}{b - a}\\int_a^b f(${vt})\\,d${vt}`, true)}</div>
       <p>It is the height of the rectangle on ${M(`[${boundShow(A)}, ${boundShow(B)}]`)} that has the same area as the region under the curve.</p>`) +
-    stage(2, 'Integrate', `<div class="math-line">${M(`\\int_{${boundShow(A)}}^{${boundShow(B)}} ${wrap(f)}\\,d${vt} = ${r.exact ? exactTex(r.exact, r.value) : valueTex(r.value)}`, true)}</div>`) +
+    stage(2, 'Integrate', `<div class="math-line">${M(`\\int_{${boundShow(A)}}^{${boundShow(B)}} ${wrap(f)}\\,d${vt} = ${r.exact ? symTexOr(r.exact, r.value) : valueTex(r.value)}`, true)}</div>`) +
     stage(3, 'Divide by the width', `<div class="math-line">${M(`f_{\\text{avg}} = \\frac{1}{${toTex(width)}}\\cdot ${r.exact ? wrap(r.exact) : fmt(r.value)} = ${avgTex}`, true)}</div>`) +
     stage(4, 'Mean Value Theorem for integrals', cs.length
       ? `<p>The function reaches its average value at ${cs.map(c => M(`${vt} = ${c.tex}`)).join(', ')}: ${M(`f(c) = f_{\\text{avg}}`)}.</p>`
       : '<p>No point in the interval was found where the function equals its average.</p>');
   $('detail-card').hidden = false;
-  const fN = fnOf(f, v);
+  const fN = fnOf(plugIn(f), v);
   $('graph-title').textContent = 'Graph';
   showGraph({
     curves: [{ f: fN, color: COLORS.f, label: 'f' }, { f: () => avg, color: '#f59e0b', label: 'avg', dash: [8, 5], width: 2.5 }],
@@ -904,11 +966,12 @@ function readOpt(id, what, allowed) {
 function runLine() {
   setMainVar('t');
   const kind = $('l-kind').value;
-  const x = readOpt('l-x', 'x(t)', ['t']), y = readOpt('l-y', 'y(t)', ['t']), z = readOpt('l-z', 'z(t)', ['t']);
+  const cv = ['t', ...P().letters];
+  const x = readOpt('l-x', 'x(t)', cv), y = readOpt('l-y', 'y(t)', cv), z = readOpt('l-z', 'z(t)', cv);
   if (!x || !y) throw new Error('Fill in x(t) and y(t) for the curve.');
   const comps = z ? [x, y, z] : [x, y];
   const dims = comps.length;
-  const vars = dims === 3 ? ['x', 'y', 'z'] : ['x', 'y'];
+  const vars = [...(dims === 3 ? ['x', 'y', 'z'] : ['x', 'y']), ...P().letters];
   const A = readBound('l-a', 'start value of t', { allowInf: false }), B = readBound('l-b', 'end value of t', { allowInf: false });
   let f = null, F = null;
   if (kind === 'scalar') {
@@ -918,12 +981,12 @@ function runLine() {
     F = ['l-P', 'l-Q', 'l-R'].slice(0, dims).map((id, i) => readOpt(id, ['P', 'Q', 'R'][i], vars));
     if (F.some(c => !c)) throw new Error(dims === 3 ? 'Fill in P, Q and R for the vector field.' : 'Fill in P and Q for the vector field.');
   }
-  const r = lineIntegral({ kind, comps, a: A, b: B, f, F });
+  const r = lineIntegral({ kind, comps, a: A, b: B, f, F, params: P() });
   const vec = list => `\\left\\langle ${list.map(toTex).join(',\\ ')} \\right\\rangle`;
   const lhs = kind === 'scalar' ? '\\int_C f\\,ds' : (r.green && r.green.closed ? '\\oint_C \\mathbf{F}\\cdot d\\mathbf{r}' : '\\int_C \\mathbf{F}\\cdot d\\mathbf{r}');
-  const val = r.res.exact ? exactTex(r.res.exact, r.res.value) : valueTex(r.res.value);
-  state.check = { kind: 'value', value: r.res.value };
-  setAnswer(kind === 'scalar' ? 'Line integral (scalar)' : 'Line integral (work)', M(`${lhs} = ${val}`, true));
+  const val = r.res.exact ? symTexOr(r.res.exact, r.res.value) : valueTex(r.res.value);
+  state.check = { kind: 'value', value: r.res.value, exact: r.res.exact };
+  setAnswer(kind === 'scalar' ? 'Line integral (scalar)' : 'Line integral (work)', M(`${lhs} = ${val}`, true) + (r.res.symbolic ? valuesLine(r.res.value) : ''));
   showSteps(r.res.anti ? r.res.anti.steps : null);
   const range = `${boundShow(A)} \\le t \\le ${boundShow(B)}`;
   let body = stage(1, 'Parametrize the curve', `<div class="math-line">${M(`\\mathbf{r}(t) = ${vec(comps)}, \\quad ${range}`, true)}</div>
@@ -948,7 +1011,7 @@ function runLine() {
       const G = r.green;
       body += stage(5, "Green's theorem", `<p>The curve is closed, so the circulation equals a double integral over the region ${M('D')} inside it:</p>
         <div class="math-line">${M(`\\oint_C P\\,dx + Q\\,dy = \\iint_D \\left(\\frac{\\partial Q}{\\partial x} - \\frac{\\partial P}{\\partial y}\\right) dA = \\iint_D ${wrap(G.curl)}\\,dA`, true)}</div>
-        <div class="math-line">${M(`= ${G.exact ? exactTex(G.exact, G.value) : valueTex(G.value)}${G.clockwise ? '\\quad(\\text{curve is clockwise, so flip the sign})' : ''}`, true)}</div>
+        <div class="math-line">${M(`= ${G.exact ? symTexOr(G.exact, G.value) : valueTex(G.value)}${G.clockwise ? '\\quad(\\text{curve is clockwise, so flip the sign})' : ''}`, true)}</div>
         <p>${Math.abs((G.clockwise ? -G.value : G.value) - r.res.value) < 1e-6 * (1 + Math.abs(r.res.value)) ? '✓ Same as the line integral.' : 'This does not match; the region may not be a simple region.'}</p>`);
     }
   }
@@ -956,7 +1019,7 @@ function runLine() {
   $('detail-card').hidden = false;
 
   // pictures
-  const cx = compile(comps[0]), cy = compile(comps[1]), cz = z ? compile(z) : null;
+  const cx = compile(plugIn(comps[0])), cy = compile(plugIn(comps[1])), cz = z ? compile(plugIn(z)) : null;
   const pt = tt => [cx({ t: tt }), cy({ t: tt })];
   if (dims === 2) {
     const n = 200, pts = Array.from({ length: n + 1 }, (_, i) => pt(A.value + (B.value - A.value) * i / n));
@@ -973,12 +1036,12 @@ function runLine() {
       arrows.push({ x: x0, y: y0, dx: (x1 - x0) / len * span * 0.06, dy: (y1 - y0) / len * span * 0.06, color: COLORS.f, width: 3, head: 10 });
     }
     if (F) {
-      const P = compile(F[0]), Q = compile(F[1]);
+      const Pf = compile(plugIn(F[0])), Qf = compile(plugIn(F[1]));
       const k = 13, cell = (view.x1 - view.x0) / k;
       const field = [];
       for (let i = 0; i <= k; i++) for (let j = 0; j <= k; j++) {
         const X = view.x0 + i * cell, Y = view.y0 + j * cell;
-        const u = P({ x: X, y: Y }), v = Q({ x: X, y: Y });
+        const u = Pf({ x: X, y: Y }), v = Qf({ x: X, y: Y });
         if (isFinite(u) && isFinite(v)) field.push({ X, Y, u, v, m: Math.hypot(u, v) });
       }
       const big = Math.max(...field.map(a => a.m), 1e-9);
@@ -1031,7 +1094,12 @@ function compute(quiet = false, keep = false) {
   state.check = null;
   $('check-out').innerHTML = '';
   try {
+    state.plug = ['riemann', 'area', 'volume'].includes(state.mode);
+    setupParams();
     RUN[state.mode]();
+    if (state.plug && P().letters.length) {
+      $('answer').insertAdjacentHTML('beforeend', `<p class="answer-note">This tab needs numbers, so it used ${P().letters.map(l => M(`${symTex(l)} = ${toTex(P().nodes[l])}`)).join(', ')}. Change the values above to see other cases.</p>`);
+    }
     setupCheck();
     gateAnswer();
   } catch (e) {
@@ -1069,6 +1137,8 @@ function revealAnswer() {
 }
 
 function setupCheck() {
+  // an exact answer that still contains letters is checked as an expression
+  if (state.check && state.check.kind === 'value' && state.check.exact && hasLetters(state.check.exact)) state.check = { kind: 'expr', target: state.check.exact };
   const c = state.check;
   $('check-box').hidden = !c;
   if (!c) return;
@@ -1258,6 +1328,12 @@ function init() {
     if (e.target.id === 'n') { $('n-out').textContent = e.target.value; compute(false, true); return; }
     if (e.target.id === 'ftc-x') { $('ftc-x-out').textContent = e.target.value; compute(true, true); return; }
     updatePreview();
+  });
+  $('params').addEventListener('change', e => {
+    const inp = e.target.closest('[data-param]');
+    if (!inp) return;
+    state.params.set(inp.dataset.param, inp.value.trim() || '1');
+    compute(false, true);
   });
   document.querySelector('.input-card').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches('input[type="text"]')) compute(); });
   $('method').addEventListener('change', () => compute(false, true));

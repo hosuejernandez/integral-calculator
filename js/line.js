@@ -21,7 +21,8 @@ const tidy = n => pretty(trigCollapse(expand(n)));
 const AX = ['x', 'y', 'z'];
 
 // curve: { comps: [x(t), y(t), z(t)?] nodes }, a, b: { node, value }
-export function lineIntegral({ kind, comps, a, b, f, F }) {
+export function lineIntegral({ kind, comps, a, b, f, F, params = null }) {
+  const env = params ? params.env : {};
   const t = 't';
   const dims = comps.length;
   const map = Object.fromEntries(comps.map((c, i) => [AX[i], c]));
@@ -38,16 +39,16 @@ export function lineIntegral({ kind, comps, a, b, f, F }) {
     const onC = F.map(P => tidy(substitute(P, map)));
     integrand = tidy(add(onC.map((P, i) => mul([P, d[i]]))));
     Object.assign(out, { onC });
-    out.conservative = conservative(F, dims);
+    out.conservative = conservative(F, dims, env);
     if (out.conservative.potential) {
       const pot = out.conservative.potential;
       const endA = simplify(substitute(pot, substituteAt(comps, a.node))), endB = simplify(substitute(pot, substituteAt(comps, b.node)));
       out.conservative.ends = { A: endA, B: endB, value: pretty(sub(endB, endA)) };
     }
-    if (dims === 2) out.green = green(F, comps, a, b);
+    if (dims === 2) out.green = green(F, comps, a, b, env);
   }
   out.integrand = integrand;
-  out.res = definite(integrand, t, a, b);
+  out.res = definite(integrand, t, a, b, params);
   return out;
 }
 
@@ -56,13 +57,13 @@ function substituteAt(comps, tNode) {
 }
 
 // zero everywhere? (checked at sample points)
-function isZero(n) {
+function isZero(n, env = {}) {
   const c = compile(n);
-  return [[0.3, 0.7, 1.1], [1.3, -0.4, 0.2], [-0.9, 1.7, -1.2], [2.1, 0.5, 0.8]].every(([x, y, z]) => Math.abs(c({ x, y, z })) < 1e-9);
+  return [[0.3, 0.7, 1.1], [1.3, -0.4, 0.2], [-0.9, 1.7, -1.2], [2.1, 0.5, 0.8]].every(([x, y, z]) => Math.abs(c({ ...env, x, y, z })) < 1e-9);
 }
 
 // F = ∇φ ?  2D: Q_x = P_y.  3D: curl F = 0.  Then build φ by integrating one variable at a time.
-function conservative(F, dims) {
+function conservative(F, dims, env) {
   const D = (n, v) => differentiate(n, v).result;
   const tests = dims === 2
     ? [{ tex: '\\frac{\\partial Q}{\\partial x} = \\frac{\\partial P}{\\partial y}', a: D(F[1], 'x'), b: D(F[0], 'y') }]
@@ -71,7 +72,7 @@ function conservative(F, dims) {
       { tex: '\\frac{\\partial P}{\\partial z} = \\frac{\\partial R}{\\partial x}', a: D(F[0], 'z'), b: D(F[2], 'x') },
       { tex: '\\frac{\\partial Q}{\\partial x} = \\frac{\\partial P}{\\partial y}', a: D(F[1], 'x'), b: D(F[0], 'y') },
     ];
-  const ok = tests.every(T => isZero(sub(T.a, T.b)));
+  const ok = tests.every(T => isZero(sub(T.a, T.b), env));
   if (!ok) return { ok, tests };
   // φ = ∫P dx, then add what is missing in y (and z)
   let phi = integrate(F[0], 'x');
@@ -90,9 +91,12 @@ function conservative(F, dims) {
 
 // Green's theorem: ∮ P dx + Q dy = ∬ (Q_x − P_y) dA over the region inside a closed curve.
 // The region is swept from a center point c:  (x, y) = c + s (r(t) − c),  dA = s·|(r − c) × r'| ds dt.
-function green(F, comps, a, b) {
+function green(F, comps, a, b, env) {
   const t = 't';
-  const X = compile(comps[0]), Y = compile(comps[1]);
+  const X0 = compile(comps[0]), Y0 = compile(comps[1]);
+  const X = e => X0({ ...env, ...e }), Y = e => Y0({ ...env, ...e });
+  const tv = B => (B.node ? compile(B.node)(env) : B.value);
+  a = { node: a.node, value: tv(a) }; b = { node: b.node, value: tv(b) };
   const start = [X({ t: a.value }), Y({ t: a.value })], end = [X({ t: b.value }), Y({ t: b.value })];
   if (Math.hypot(start[0] - end[0], start[1] - end[1]) > 1e-9) return { closed: false };
   const curl = tidy(sub(differentiate(F[1], 'x').result, differentiate(F[0], 'y').result));
@@ -106,8 +110,8 @@ function green(F, comps, a, b) {
   const jac = tidy(sub(mul([relX, dy]), mul([relY, dx])));
   const curlAt = substitute(curl, { x: add([cx, mul([s, relX])]), y: add([cy, mul([s, relY])]) });
   const integrand = tidy(mul([curlAt, s, jac]));
-  const r = iterated(integrand, [{ v: 's', lo: num(0), hi: num(1) }, { v: t, lo: a.node, hi: b.node }]);
-  const area = iterated(tidy(mul([s, jac])), [{ v: 's', lo: num(0), hi: num(1) }, { v: t, lo: a.node, hi: b.node }]);
+  const r = iterated(integrand, [{ v: 's', lo: num(0), hi: num(1) }, { v: t, lo: a.node, hi: b.node }], env);
+  const area = iterated(tidy(mul([s, jac])), [{ v: 's', lo: num(0), hi: num(1) }, { v: t, lo: a.node, hi: b.node }], env);
   return { closed: true, curl, value: r.value, exact: r.exact, clockwise: area.value < 0 };
 }
 
